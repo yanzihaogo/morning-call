@@ -7,16 +7,21 @@ from datetime import datetime
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
-# ================= 2. 伪装抓取新闻 (修复空素材问题) =================
+# ================= 2. 抓取新闻 (换回你原本稳定好用的源) =================
 def get_news():
+    # 使用你最初验证过能成功抓取的稳定源
     rss_sources = {
-        "宏观政策": ["https://www.caixin.com/rss/"],
-        "市场动态": ["https://xueqiu.com/statuses/hot.rss"],
-        "全球资讯": ["https://cn.reuters.com/rss"]
+        "宏观与市场": [
+            "https://www.caixin.com/rss/",
+            "https://www.21jingji.com/rss/"
+        ],
+        "行业与公司": [
+            "https://rss.eastmoney.com/EM_StockNews.aspx",
+            "https://www.tmtpost.com/rss"
+        ]
     }
     news_items = []
     
-    # 这一行就是我们的“伪装面具”，假装自己是真正的谷歌浏览器
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -24,20 +29,17 @@ def get_news():
     for cat, urls in rss_sources.items():
         for url in urls:
             try:
-                # 先戴上面具把网页源码拿回来
                 response = requests.get(url, headers=headers, timeout=10)
-                # 再交给 feedparser 解析
                 feed = feedparser.parse(response.content)
-                for entry in feed.entries[:5]:
+                for entry in feed.entries[:4]: # 每个源抓取4条，确保素材充足
                     news_items.append(f"【{cat}】{entry.title}")
             except Exception as e:
                 print(f"🚨 抓取 {url} 失败: {e}")
                 
     return "\n".join(news_items)
 
-# ================= 3. Gemini 专业总结 (带防弹衣版本) =================
+# ================= 3. Gemini 专业总结 =================
 def get_gemini_report(raw_content):
-    # 如果真的连不上网，没有抓到新闻，提前拦截
     if not raw_content.strip():
         return "今日新闻源抓取失败，素材为空，请检查网络或网站反爬策略。"
 
@@ -62,8 +64,6 @@ def get_gemini_report(raw_content):
     
     try:
         res = requests.post(url, headers=headers, json=payload).json()
-        
-        # 安全提取，防止再次出现 KeyError 崩溃
         report = res.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         
         if not report:
@@ -71,7 +71,6 @@ def get_gemini_report(raw_content):
             return "早报生成失败，Gemini 未返回有效正文，请查看 Action 日志。"
             
         return report
-        
     except Exception as e:
         print(f"🚨 请求过程中发生严重错误: {e}")
         return "早报请求失败，可能遭遇了网络波动。"
