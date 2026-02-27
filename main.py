@@ -42,6 +42,12 @@ def get_gemini_report(raw_content):
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     res = requests.post(url, json=payload).json()
+
+    # === 新增下面这三行用来排错 ===
+    if 'candidates' not in res:
+        print("🚨 抓包到了！Gemini 的真实报错信息是：", res)
+        return "早报生成失败，请检查 GitHub Action 日志。"
+        
     return res['candidates'][0]['content']['parts'][0]['text']
 
 # ================= 4. 构建 HTML 视觉模板 =================
@@ -92,3 +98,4 @@ if __name__ == "__main__":
     }
     requests.post("http://www.pushplus.plus/send", json=push_data)
     print("✅ 内参已送达")
+
