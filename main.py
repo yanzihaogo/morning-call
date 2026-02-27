@@ -7,7 +7,7 @@ from datetime import datetime
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
-# ================= 2. 严肃新闻抓取 =================
+# ================= 2. 伪装抓取新闻 (修复空素材问题) =================
 def get_news():
     rss_sources = {
         "宏观政策": ["https://www.caixin.com/rss/"],
@@ -15,16 +15,32 @@ def get_news():
         "全球资讯": ["https://cn.reuters.com/rss"]
     }
     news_items = []
+    
+    # 这一行就是我们的“伪装面具”，假装自己是真正的谷歌浏览器
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
     for cat, urls in rss_sources.items():
         for url in urls:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
-                news_items.append(f"【{cat}】{entry.title}")
+            try:
+                # 先戴上面具把网页源码拿回来
+                response = requests.get(url, headers=headers, timeout=10)
+                # 再交给 feedparser 解析
+                feed = feedparser.parse(response.content)
+                for entry in feed.entries[:5]:
+                    news_items.append(f"【{cat}】{entry.title}")
+            except Exception as e:
+                print(f"🚨 抓取 {url} 失败: {e}")
+                
     return "\n".join(news_items)
 
-# ================= 3. Gemini 专业总结 =================
+# ================= 3. Gemini 专业总结 (带防弹衣版本) =================
 def get_gemini_report(raw_content):
-    # 换回第一版成功运行的模型链接，并加上 headers
+    # 如果真的连不上网，没有抓到新闻，提前拦截
+    if not raw_content.strip():
+        return "今日新闻源抓取失败，素材为空，请检查网络或网站反爬策略。"
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     
@@ -47,13 +63,12 @@ def get_gemini_report(raw_content):
     try:
         res = requests.post(url, headers=headers, json=payload).json()
         
-        # 恢复第一版的“安全提取”魔法，防止 KeyError 崩溃
+        # 安全提取，防止再次出现 KeyError 崩溃
         report = res.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         
-        # 如果提取出来的文章是空的，说明被 API 拦截了或者出错了
         if not report:
-            print("🚨 抓包到了！Gemini 返回了异常数据（可能是触发了某些金融词汇过滤）：", res)
-            return "早报生成失败，请登录 GitHub 查看具体报错日志。"
+            print("🚨 抓包到了！Gemini 返回异常：", res)
+            return "早报生成失败，Gemini 未返回有效正文，请查看 Action 日志。"
             
         return report
         
@@ -64,7 +79,6 @@ def get_gemini_report(raw_content):
 # ================= 4. 构建 HTML 视觉模板 =================
 def create_html(report_text):
     today = datetime.now().strftime("%Y-%m-%d")
-    # 这里是一个精美的 HTML 模板，模拟纸质报纸的质感
     html_template = f"""
     <html>
     <head>
@@ -93,21 +107,25 @@ def create_html(report_text):
 
 # ================= 5. 执行与推送 =================
 if __name__ == "__main__":
-    # 1. 获取并总结
+    print("☀️ 开始抓取新闻...")
     news = get_news()
+    
+    print("🧠 呼叫 Gemini 进行总结...")
     report = get_gemini_report(news)
+    
+    print("🎨 正在排版...")
     html_content = create_html(report)
     
-    # 2. 推送至 PushPlus (由于图片转换在 GitHub Actions 比较重，
-    # 我们先用 PushPlus 的 HTML 模板实现类似图片的排版效果)
-    # 这样无需生成实体图片，但在微信里看起来像是一张精美的长文。
+    print("📲 正在推送到微信...")
     push_data = {
         "token": PUSHPLUS_TOKEN,
         "title": f"📈 {datetime.now().strftime('%m月%d日')} 财经内参",
         "content": html_content,
         "template": "html"
     }
-    requests.post("http://www.pushplus.plus/send", json=push_data)
-    print("✅ 内参已送达")
-
-
+    res = requests.post("http://www.pushplus.plus/send", json=push_data)
+    
+    if res.status_code == 200:
+        print("✅ 内参已成功送达微信！")
+    else:
+        print("❌ 微信推送失败:", res.text)
