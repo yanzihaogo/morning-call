@@ -24,7 +24,9 @@ def get_news():
 
 # ================= 3. Gemini 专业总结 =================
 def get_gemini_report(raw_content):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    # 换回第一版成功运行的模型链接，并加上 headers
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
     你是一名资深金融分析师。请根据以下素材撰写一份《每日金融内参》。
@@ -41,14 +43,23 @@ def get_gemini_report(raw_content):
     """
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    res = requests.post(url, json=payload).json()
-
-    # === 新增下面这三行用来排错 ===
-    if 'candidates' not in res:
-        print("🚨 抓包到了！Gemini 的真实报错信息是：", res)
-        return "早报生成失败，请检查 GitHub Action 日志。"
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload).json()
         
-    return res['candidates'][0]['content']['parts'][0]['text']
+        # 恢复第一版的“安全提取”魔法，防止 KeyError 崩溃
+        report = res.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        
+        # 如果提取出来的文章是空的，说明被 API 拦截了或者出错了
+        if not report:
+            print("🚨 抓包到了！Gemini 返回了异常数据（可能是触发了某些金融词汇过滤）：", res)
+            return "早报生成失败，请登录 GitHub 查看具体报错日志。"
+            
+        return report
+        
+    except Exception as e:
+        print(f"🚨 请求过程中发生严重错误: {e}")
+        return "早报请求失败，可能遭遇了网络波动。"
 
 # ================= 4. 构建 HTML 视觉模板 =================
 def create_html(report_text):
@@ -98,4 +109,5 @@ if __name__ == "__main__":
     }
     requests.post("http://www.pushplus.plus/send", json=push_data)
     print("✅ 内参已送达")
+
 
