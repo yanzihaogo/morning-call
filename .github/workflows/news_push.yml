@@ -1,34 +1,34 @@
-name: 每日新闻抓取与推送
+name: 每日宏观早报抓取与语音合成
 
 on:
   schedule:
-    # 重点：GitHub 服务器用的是 UTC 时间（世界标准时间）。
-    # 北京时间比 UTC 快 8 小时。所以北京时间的早上 8:00，就是 UTC 的 0:00。
-    # cron 格式: '分 时 日 月 周'
+    # 每天 UTC 0:00 运行 (北京时间早上 8:00)
     - cron: '0 0 * * *' 
-  workflow_dispatch: # 这个配置允许你在 GitHub 网页上手动点击运行，方便测试
+  workflow_dispatch: # 允许你在网页上手动点击运行
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu 系统运行你的代码
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3 # 拉取你的代码库
+        uses: actions/checkout@v4 # 拉取你的代码库
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 指定 Python 版本
+          python-version: '3.10' # 指定 Python 3.10 版本
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests # 安装 requests 库
+          # 这里新增了 edge-tts，用于后续将文本转为语音
+          pip install requests edge-tts
 
-      - name: Run News Scraper
+      - name: Run News Scraper and Audio Generator
         env:
-          # 从 GitHub Secrets 中读取你的密钥，绝对安全
+          # 从 GitHub Secrets 读取你的环境变量
           COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
           COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }} # 如果你用 PushPlus 推送的话
-        run: python main.py # 假设你的 Python 脚本名字叫 main.py
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python main.py
