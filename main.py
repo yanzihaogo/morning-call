@@ -93,11 +93,94 @@ def fetch_news_from_coze():
         return None
 
 # ==========================================
-# 4. 生成推送给微信的文字排版 (Markdown版)
+# 4. 生成专供语音朗读的纯文本台本
 # ==========================================
-def format_text_for_wechat(data):
-    msg_content = f"## 🎙️ 全球宏观与市场行情详报 ({today_str})\n\n---\n"
+def format_text_for_audio(data):
+    # 模拟电台主播口吻
+    script = f"早上好！今天是{today_str}。欢迎收听今日全球宏观与市场详报。\n\n"
     
+    script += "首先为您播报今日核心要闻。\n"
+    for idx, item in enumerate(data.get('top_news', []), 1):
+        script += f"第{idx}条，{item.get('title', '无标题')}。{item.get('summary', '无摘要')}\n\n"
+    
+    script += "接下来是市场情绪与焦点观察。\n"
+    script += f"{data.get('market_focus', '暂无观察数据')}\n\n"
+
+    script += "主要市场行情综述方面。\n"
+    indices = data.get('market_indices', {})
+    script += f"沪深A股：{indices.get('A_shares', '暂无数据')}\n"
+    script += f"港股市场：{indices.get('HK_shares', '暂无数据')}\n"
+    script += f"美股市场：{indices.get('US_shares', '暂无数据')}\n\n"
+
+    script += "大宗商品期货方面。\n"
+    commodities = data.get('commodities', {})
+    script += f"黄金：{commodities.get('gold', '暂无数据')}\n"
+    script += f"白银：{commodities.get('silver', '暂无数据')}\n"
+    script += f"原油：{commodities.get('crude_oil', '暂无数据')}\n\n"
+    
+    script += "最后为您带来市场脉搏简报。\n"
+    briefings = data.get('briefings', [])
+    if briefings:
+        for b in briefings:
+            script += f"{b.get('category', '简报')}：{b.get('content', '无内容')}\n"
+    
+    script += "\n以上就是今天的全部内容，感谢您的收听，祝您生活愉快。"
+    return script
+
+# ==========================================
+# 5. 合成语音 MP3
+# ==========================================
+async def generate_audio(audio_script):
+    print("🎙️ 正在召唤 AI 播音员 (晓晓) 录制新闻音频...")
+    voice = "zh-CN-XiaoxiaoNeural" # 微软晓晓，知性女声
+    output_file = "daily_news.mp3"
+    
+    try:
+        communicate = edge_tts.Communicate(audio_script, voice, rate="+5%")
+        await communicate.save(output_file)
+        print(f"✅ 音频录制完成！成功生成文件：{output_file}")
+        return output_file
+    except Exception as e:
+        print(f"❌ 音频生成失败: {e}")
+        return None
+
+# ==========================================
+# 6. 上传 MP3 到云端获取链接
+# ==========================================
+def upload_audio(file_path):
+    print("☁️ 正在将音频上传至云端生成播放链接...")
+    try:
+        with open(file_path, 'rb') as f:
+            # 使用 catbox 免费文件托管服务
+            files = {'fileToUpload': f}
+            data = {'reqtype': 'fileupload'}
+            res = requests.post('https://catbox.moe/user/api.php', data=data, files=files, timeout=30)
+            if res.status_code == 200:
+                audio_url = res.text
+                print(f"✅ 音频上传成功！链接: {audio_url}")
+                return audio_url
+            else:
+                print(f"❌ 上传失败，状态码: {res.status_code}")
+                return None
+    except Exception as e:
+        print(f"❌ 上传过程发生异常: {e}")
+        return None
+
+# ==========================================
+# 7. 生成微信文字排版并推送 (带语音链接版)
+# ==========================================
+def format_and_push_wechat(data, audio_link):
+    print("📲 正在排版并推送至微信...")
+    
+    # 【核心改动】：顶部的日期前缀与语音播报入口
+    msg_content = f"## 📅 {today_str} - 🎙️ 您的专属宏观与市场早报\n\n"
+    
+    if audio_link:
+        msg_content += f"### 👉 **[点击此处，直接收听今日早报语音版]({audio_link})** 👈\n\n---\n\n"
+    else:
+        msg_content += "*(⚠️ 今日音频生成或上传失败，请阅读以下文字版)*\n\n---\n\n"
+    
+    # 下方保留文字版，方便扫读
     msg_content += "### 📌 【今日核心要闻】\n"
     for idx, item in enumerate(data.get('top_news', []), 1):
         msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
@@ -128,79 +211,23 @@ def format_text_for_wechat(data):
     else:
         msg_content += "- 暂无异动或重大投资简报\n\n"
 
-    return msg_content
-
-# ==========================================
-# 5. 生成专供语音朗读的纯文本台本 (无表情无链接版)
-# ==========================================
-def format_text_for_audio(data):
-    # 用自然语言串联，模拟电台主播口吻
-    script = f"早上好！今天是{today_str}。欢迎收听今日全球宏观与市场详报。\n\n"
-    
-    script += "首先为您播报今日核心要闻。\n"
-    for idx, item in enumerate(data.get('top_news', []), 1):
-        script += f"第{idx}条，{item.get('title', '无标题')}。{item.get('summary', '无摘要')}\n\n"
-    
-    script += "接下来是市场情绪与焦点观察。\n"
-    script += f"{data.get('market_focus', '暂无观察数据')}\n\n"
-
-    script += "主要市场行情综述方面。\n"
-    indices = data.get('market_indices', {})
-    script += f"沪深A股：{indices.get('A_shares', '暂无数据')}\n"
-    script += f"港股市场：{indices.get('HK_shares', '暂无数据')}\n"
-    script += f"美股市场：{indices.get('US_shares', '暂无数据')}\n\n"
-
-    script += "大宗商品期货方面。\n"
-    commodities = data.get('commodities', {})
-    script += f"黄金：{commodities.get('gold', '暂无数据')}\n"
-    script += f"白银：{commodities.get('silver', '暂无数据')}\n"
-    script += f"原油：{commodities.get('crude_oil', '暂无数据')}\n\n"
-    
-    script += "最后为您带来市场脉搏简报。\n"
-    briefings = data.get('briefings', [])
-    if briefings:
-        for b in briefings:
-            script += f"{b.get('category', '简报')}：{b.get('content', '无内容')}\n"
-    
-    script += "\n以上就是今天的全部内容，祝您投资顺利，生活愉快。"
-    return script
-
-# ==========================================
-# 6. 推送到微信文字版
-# ==========================================
-def push_text_to_wechat(msg_content):
-    print("📲 正在推送文字版到微信...")
+    # 推送请求
     url = 'http://www.pushplus.plus/send'
     push_data = {
         "token": pushplus_token,
-        "title": f"🎙️ {today_str} 宏观与市场详报",
+        "title": f"🎙️ {today_str} 宏观市场早报已送达",
         "content": msg_content,
         "template": "markdown"
     }
+    
     try:
         res = requests.post(url, json=push_data)
         if res.json().get('code') == 200:
-            print("✅ 微信文字推送成功！")
+            print("✅ 微信推送成功！请查收！")
         else:
             print(f"❌ 微信推送失败：{res.json()}")
     except Exception as e:
         print(f"❌ 推送请求异常: {e}")
-
-# ==========================================
-# 7. 合成语音 MP3 (核心音频部分)
-# ==========================================
-async def generate_audio(audio_script):
-    print("🎙️ 正在召唤 AI 播音员 (云希) 录制新闻音频...")
-    voice = "zh-CN-YunxiNeural" # 微软云希男声，非常沉稳适合新闻
-    output_file = "daily_news.mp3"
-    
-    try:
-        # rate="+5%" 表示语速稍微加快5%，听起来更干练
-        communicate = edge_tts.Communicate(audio_script, voice, rate="+5%")
-        await communicate.save(output_file)
-        print(f"✅ 音频录制完成！成功生成文件：{output_file}")
-    except Exception as e:
-        print(f"❌ 音频生成失败: {e}")
 
 # ==========================================
 # 🚀 主运行控制台
@@ -212,18 +239,21 @@ async def main():
         print("流程异常结束：未获取到有效数据。")
         return
 
-    # 2. 生成双版本文案
-    wechat_text = format_text_for_wechat(report_data)
+    # 2. 生成语音台本
     audio_script = format_text_for_audio(report_data)
 
-    # 3. 发送微信文字版（保证长辈每天准时能看到字）
-    push_text_to_wechat(wechat_text)
+    # 3. 合成 MP3 音频文件
+    audio_file_path = await generate_audio(audio_script)
+    
+    # 4. 上传音频获取云端链接
+    audio_link = None
+    if audio_file_path:
+        audio_link = upload_audio(audio_file_path)
 
-    # 4. 生成 MP3 音频文件
-    await generate_audio(audio_script)
+    # 5. 生成图文排版并合并链接推送到微信
+    format_and_push_wechat(report_data, audio_link)
     
     print("🎉 今日全部自动化任务圆满完成！")
 
 if __name__ == '__main__':
-    # 启动异步主函数
     asyncio.run(main())
