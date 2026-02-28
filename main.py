@@ -18,7 +18,7 @@ def fetch_news_from_coze():
         'Content-Type': 'application/json'
     }
     
-    chat_url = '[https://api.coze.cn/v3/chat](https://api.coze.cn/v3/chat)'
+    chat_url = https://api.coze.cn/v3/chat'
     payload = {
         "bot_id": coze_bot_id,
         "user_id": "quant_master", 
@@ -36,7 +36,7 @@ def fetch_news_from_coze():
         conversation_id = res['data']['conversation_id']
         print("✅ 任务已下达，等待特工汇总数据...")
         
-        retrieve_url = f'[https://api.coze.cn/v3/chat/retrieve?chat_id=](https://api.coze.cn/v3/chat/retrieve?chat_id=){chat_id}&conversation_id={conversation_id}'
+        retrieve_url = f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}'
         while True:
             ret = requests.get(retrieve_url, headers=headers).json()
             status = ret.get('data', {}).get('status')
@@ -48,7 +48,7 @@ def fetch_news_from_coze():
                 return None
             time.sleep(2)
             
-        msg_url = f'[https://api.coze.cn/v3/chat/message/list?chat_id=](https://api.coze.cn/v3/chat/message/list?chat_id=){chat_id}&conversation_id={conversation_id}'
+        msg_url = f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}'
         msgs_res = requests.get(msg_url, headers=headers).json()
         
         content = ""
@@ -105,7 +105,7 @@ def push_to_wechat(data):
     msg_content += "### 👁️ 【市场情绪与焦点观察】\n"
     msg_content += f"{data.get('market_focus', '暂无观察数据')}\n"
 
-    url = '[http://www.pushplus.plus/send](http://www.pushplus.plus/send)'
+    url = 'http://www.pushplus.plus/send'
     push_data = {
         "token": pushplus_token,
         "title": "📊 今日客观行情与宏观简报已送达",
@@ -125,3 +125,4 @@ if __name__ == '__main__':
         push_to_wechat(report_data)
     else:
         print("流程异常结束。")
+
