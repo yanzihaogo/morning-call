@@ -95,12 +95,9 @@ def fetch_news_from_coze():
 def clean_for_speech(text):
     if not text:
         return "无内容"
-    # 剔除所有的 http 链接
     text = re.sub(r'http[s]?://\S+', '', text)
-    # 剔除包含“来源”或“链接”的常见字眼
     text = re.sub(r'来源链接[:：]?\s*', '', text)
     text = re.sub(r'数据来源[:：]?\s*', '', text)
-    # 剔除 Markdown 图片和链接符号格式 [文字](链接)
     text = re.sub(r'\[.*?\]\(.*?\)', '', text)
     return text.strip()
 
@@ -112,7 +109,6 @@ def format_text_for_audio(data):
     
     script += "首先为您播报今日核心要闻。\n"
     for idx, item in enumerate(data.get('top_news', []), 1):
-        # 经过严格的清洗，确保没有任何乱七八糟的链接被读出来
         clean_title = clean_for_speech(item.get('title', '无标题'))
         clean_summary = clean_for_speech(item.get('summary', '无摘要'))
         script += f"第{idx}条，{clean_title}。{clean_summary}\n\n"
@@ -160,27 +156,24 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 上传 MP3 到云端获取链接 (增加防拦截机制)
+# 上传 MP3 到云端获取链接 (更换 tmpfiles.org)
 # ==========================================
 def upload_audio(file_path):
-    print("☁️ 正在将音频上传至云端生成播放链接...")
+    print("☁️ 正在尝试将音频上传至备用云端 (tmpfiles.org) 生成播放链接...")
     try:
         with open(file_path, 'rb') as f:
-            files = {'fileToUpload': f}
-            data = {'reqtype': 'fileupload'}
-            # 戴上“人类面具”，防止被网盘当成机器人拦截
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-            }
-            res = requests.post('https://catbox.moe/user/api.php', data=data, files=files, headers=headers, timeout=60)
+            files = {'file': f}
+            res = requests.post('https://tmpfiles.org/api/v1/upload', files=files, timeout=60)
+            
             if res.status_code == 200:
-                audio_url = res.text.strip()
-                print(f"✅ 音频上传成功！链接: {audio_url}")
-                return audio_url
-            else:
-                print(f"❌ 上传失败，服务器返回状态码: {res.status_code}")
-                print(f"错误详情: {res.text}")
-                return None
+                res_json = res.json()
+                if res_json.get('status') == 'success':
+                    audio_url = res_json['data']['url']
+                    print(f"✅ 音频上传成功！链接: {audio_url}")
+                    return audio_url
+            
+            print(f"❌ 上传失败，服务器返回: {res.text}")
+            return None
     except Exception as e:
         print(f"❌ 上传过程发生异常: {e}")
         return None
@@ -193,7 +186,7 @@ def format_and_push_wechat(data, audio_link):
     msg_content = f"## 📅 {today_str} - 🎙️ 您的专属宏观与市场早报\n\n"
     
     if audio_link:
-        msg_content += f"### 👉 **[点击此处，直接收听今日早报语音版]({audio_link})** 👈\n\n---\n\n"
+        msg_content += f"### 👉 **[点击此处，收听今日早报语音版]({audio_link})** 👈\n\n---\n\n"
     else:
         msg_content += "*(⚠️ 今日音频生成或上传失败，请阅读以下文字版)*\n\n---\n\n"
     
@@ -253,7 +246,6 @@ async def main():
         print("流程异常结束：未获取到有效数据。")
         return
 
-    # 语音台本已接入“清洗机”
     audio_script = format_text_for_audio(report_data)
 
     audio_file_path = await generate_audio(audio_script)
