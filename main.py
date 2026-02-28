@@ -2,39 +2,23 @@ import os
 import requests
 import json
 import re
-import time  # 新增了时间模块，用来等待 AI 抓取
+import time
 
-# ==========================================
-# 1. 读取我们的“通行证”
-# ==========================================
+# 读取变量
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
 pushplus_token = os.getenv('PUSHPLUS_TOKEN')
 
-# ==========================================
-# 2. 定义你想抓取的主题
-# ==========================================
-SEARCH_PROMPT = """
-请帮我抓取今天关于以下几个主题的最新重要新闻，总共精选 5-8 条即可：
-1. 半导体与芯片行业动态
-2. 航空航天板块及相关个股消息
-3. A股市场重磅宏观消息
-
-请务必使用插件进行全网搜索。
-严格输出纯 JSON 数组格式，不要有任何多余的开场白。
-JSON字段需包含：title(标题), summary(摘要,50字左右), url(链接), time(时间)。
-"""
+SEARCH_PROMPT = "请立即执行每日宏观市场与商品行情数据抓取，严格按预设 JSON 格式返回。"
 
 def fetch_news_from_coze():
-    print("🕵️‍♂️ 正在派出 Coze 特工潜入全网搜集情报...")
-    
+    print("🕵️‍♂️ 正在潜入全网搜集客观行情情报...")
     headers = {
         'Authorization': f'Bearer {coze_token}',
         'Content-Type': 'application/json'
     }
     
-    # 【第一步】下达指令，发起对话任务
-    chat_url = 'https://api.coze.cn/v3/chat'
+    chat_url = '[https://api.coze.cn/v3/chat](https://api.coze.cn/v3/chat)'
     payload = {
         "bot_id": coze_bot_id,
         "user_id": "quant_master", 
@@ -50,26 +34,21 @@ def fetch_news_from_coze():
             
         chat_id = res['data']['id']
         conversation_id = res['data']['conversation_id']
-        print("✅ 任务已下达，等待特工抓取数据 (这可能需要十几秒，请耐心等待)...")
+        print("✅ 任务已下达，等待特工汇总数据...")
         
-        # 【第二步】轮询查岗：问 AI 抓完没有
-        retrieve_url = f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}'
+        retrieve_url = f'[https://api.coze.cn/v3/chat/retrieve?chat_id=](https://api.coze.cn/v3/chat/retrieve?chat_id=){chat_id}&conversation_id={conversation_id}'
         while True:
             ret = requests.get(retrieve_url, headers=headers).json()
             status = ret.get('data', {}).get('status')
             
             if status == 'completed':
-                print("✅ 抓取完成！")
                 break
             elif status in ['failed', 'canceled', 'requires_action']:
                 print(f"❌ 抓取任务异常中断，状态: {status}")
                 return None
-            
-            # 没完成的话，等 2 秒再查一遍
             time.sleep(2)
             
-        # 【第三步】任务确认完成后，去收发室取信件（提取最终结果）
-        msg_url = f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}'
+        msg_url = f'[https://api.coze.cn/v3/chat/message/list?chat_id=](https://api.coze.cn/v3/chat/message/list?chat_id=){chat_id}&conversation_id={conversation_id}'
         msgs_res = requests.get(msg_url, headers=headers).json()
         
         content = ""
@@ -78,59 +57,71 @@ def fetch_news_from_coze():
                 content = msg.get('content')
                 break
         
-        print("📥 收到情报，正在解码...")
-        
-        # 提取真正的 JSON 数据
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
         else:
-            print("❌ 解码失败，AI 返回的内容不是标准 JSON。返回原文看一眼：")
-            print(content)
+            print("❌ 解码失败，返回原文：\n", content)
             return None
             
     except Exception as e:
-        print(f"❌ 抓取过程中遭遇未知阻击: {e}")
+        print(f"❌ 抓取异常: {e}")
         return None
 
-def push_to_wechat(news_list):
-    if not news_list:
-        print("⚠️ 报告老板，今天没有获取到有效新闻，放弃推送。")
+def push_to_wechat(data):
+    if not data or not isinstance(data, dict):
+        print("⚠️ 获取的数据格式不对，取消推送。")
         return
 
-    print(f"✅ 成功解析 {len(news_list)} 条新闻，正在排版发往微信...")
+    print("✅ 数据解析成功，正在排版...")
     
-    # 组装漂亮的 Markdown 推文
-    msg_content = "## 📈 您的专属财经与科技早报\n\n"
-    for idx, item in enumerate(news_list, 1):
-        title = item.get('title', '未知标题')
-        summary = item.get('summary', '无摘要内容')
-        url = item.get('url', '#')
-        time_str = item.get('time', '刚刚')
-        
-        msg_content += f"### {idx}. {title}\n"
-        msg_content += f"⏱ **时间**: {time_str}\n\n"
-        msg_content += f"📝 **摘要**: {summary}\n\n"
-        msg_content += f"🔗 [点击阅读原文]({url})\n\n"
-        msg_content += "---\n"
+    msg_content = "## 📊 全球市场行情与宏观简报\n\n---\n"
+    
+    # 1. 股市速览
+    msg_content += "### 🌐 【主要市场收盘综述】\n"
+    indices = data.get('market_indices', {})
+    msg_content += f"- **🇨🇳 沪深 A 股**: {indices.get('A_shares', '暂无数据')}\n"
+    msg_content += f"- **🇭🇰 港股市场**: {indices.get('HK_shares', '暂无数据')}\n"
+    msg_content += f"- **🇺🇸 美股市场**: {indices.get('US_shares', '暂无数据')}\n\n---\n"
 
-    url = 'http://www.pushplus.plus/send'
-    data = {
+    # 2. 商品速览
+    msg_content += "### 🛢️ 【大宗商品期货综述】\n"
+    commodities = data.get('commodities', {})
+    msg_content += f"- **🥇 黄金**: {commodities.get('gold', '暂无数据')}\n"
+    msg_content += f"- **🥈 白银**: {commodities.get('silver', '暂无数据')}\n"
+    msg_content += f"- **🛢️ 原油**: {commodities.get('crude_oil', '暂无数据')}\n\n---\n"
+    
+    # 3. 宏观要闻
+    msg_content += "### 📌 【今日最重要的三条】\n"
+    top_news = data.get('top_news', [])
+    for idx, item in enumerate(top_news, 1):
+        msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
+        msg_content += f"> {item.get('summary', '无摘要')}\n"
+        msg_content += f"[🔗 来源链接]({item.get('url', '#')})\n\n"
+        
+    msg_content += "---\n"
+    
+    # 4. 市场情绪与焦点
+    msg_content += "### 👁️ 【市场情绪与焦点观察】\n"
+    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n"
+
+    url = '[http://www.pushplus.plus/send](http://www.pushplus.plus/send)'
+    push_data = {
         "token": pushplus_token,
-        "title": "📰 今日核心情报已送达",
+        "title": "📊 今日客观行情与宏观简报已送达",
         "content": msg_content,
         "template": "markdown"
     }
     
-    res = requests.post(url, json=data)
+    res = requests.post(url, json=push_data)
     if res.json().get('code') == 200:
-        print("🚀 推送成功！请查收微信！")
+        print("🚀 推送成功！")
     else:
         print(f"❌ 推送失败：{res.json()}")
 
 if __name__ == '__main__':
-    news_data = fetch_news_from_coze()
-    if news_data:
-        push_to_wechat(news_data)
+    report_data = fetch_news_from_coze()
+    if report_data:
+        push_to_wechat(report_data)
     else:
         print("流程异常结束。")
