@@ -3,6 +3,7 @@ import requests
 import json
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 1. 读取我们的“通行证”
@@ -11,8 +12,24 @@ coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
 pushplus_token = os.getenv('PUSHPLUS_TOKEN')
 
-# 触发 Coze 特工开始工作的暗号（抓取逻辑和格式要求已在 Coze 后台设定好）
-SEARCH_PROMPT = "请立即执行每日宏观市场与商品行情数据深度抓取，严格按预设 JSON 格式返回。"
+# ==========================================
+# 2. 动态生成带时间的精准指令 (核心防重复逻辑)
+# ==========================================
+# 获取北京时间 (UTC+8)
+tz_bj = timezone(timedelta(hours=8))
+now_bj = datetime.now(tz_bj)
+today_str = now_bj.strftime('%Y年%m月%d日')
+yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
+
+# 把具体日期喂给 AI，并加上防重复的紧箍咒
+SEARCH_PROMPT = f"""
+今天是 {today_str}。请立即执行每日宏观市场与商品行情数据深度抓取。
+
+【防重复死命令】：
+1. 你的搜索范围必须严格限定在 {yesterday_str} 到 {today_str} 这过去 24 小时内发生的新闻。
+2. 绝对不要播报几天前已经充分发酵过的旧新闻（例如旧的经济数据公布、旧的会议纪要等），除非今天该事件有了重大的、实质性的最新进展。
+3. 严格按预设 JSON 格式返回。
+"""
 
 def fetch_news_from_coze():
     print("🕵️‍♂️ 正在潜入全网搜集客观行情情报...")
@@ -154,3 +171,4 @@ if __name__ == '__main__':
         push_to_wechat(report_data)
     else:
         print("流程异常结束。")
+
