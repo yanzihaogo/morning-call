@@ -4,7 +4,9 @@ import json
 import re
 import time
 
-# 读取变量
+# ==========================================
+# 1. 读取我们的“通行证”
+# ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
 pushplus_token = os.getenv('PUSHPLUS_TOKEN')
@@ -18,7 +20,7 @@ def fetch_news_from_coze():
         'Content-Type': 'application/json'
     }
     
-    chat_url = https://api.coze.cn/v3/chat'
+    chat_url = 'https://api.coze.cn/v3/chat'
     payload = {
         "bot_id": coze_bot_id,
         "user_id": "quant_master", 
@@ -36,6 +38,7 @@ def fetch_news_from_coze():
         conversation_id = res['data']['conversation_id']
         print("✅ 任务已下达，等待特工汇总数据...")
         
+        # 轮询查岗：问 AI 抓完没有
         retrieve_url = f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}'
         while True:
             ret = requests.get(retrieve_url, headers=headers).json()
@@ -48,6 +51,7 @@ def fetch_news_from_coze():
                 return None
             time.sleep(2)
             
+        # 任务确认完成后，去收发室取信件（提取最终结果）
         msg_url = f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}'
         msgs_res = requests.get(msg_url, headers=headers).json()
         
@@ -57,6 +61,9 @@ def fetch_news_from_coze():
                 content = msg.get('content')
                 break
         
+        print("📥 收到情报，正在解码...")
+        
+        # 提取真正的 JSON 数据
         json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
@@ -75,6 +82,7 @@ def push_to_wechat(data):
 
     print("✅ 数据解析成功，正在排版...")
     
+    # 组装漂亮的 Markdown 推文
     msg_content = "## 📊 全球市场行情与宏观简报\n\n---\n"
     
     # 1. 股市速览
@@ -115,7 +123,7 @@ def push_to_wechat(data):
     
     res = requests.post(url, json=push_data)
     if res.json().get('code') == 200:
-        print("🚀 推送成功！")
+        print("🚀 推送成功！请查收微信！")
     else:
         print(f"❌ 推送失败：{res.json()}")
 
