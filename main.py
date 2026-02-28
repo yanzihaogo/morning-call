@@ -11,7 +11,8 @@ coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
 pushplus_token = os.getenv('PUSHPLUS_TOKEN')
 
-SEARCH_PROMPT = "请立即执行每日宏观市场与商品行情数据抓取，严格按预设 JSON 格式返回。"
+# 触发 Coze 特工开始工作的暗号（抓取逻辑和格式要求已在 Coze 后台设定好）
+SEARCH_PROMPT = "请立即执行每日宏观市场与商品行情数据深度抓取，严格按预设 JSON 格式返回。"
 
 def fetch_news_from_coze():
     print("🕵️‍♂️ 正在潜入全网搜集客观行情情报...")
@@ -20,6 +21,7 @@ def fetch_news_from_coze():
         'Content-Type': 'application/json'
     }
     
+    # 【第一步】下达指令，发起对话任务
     chat_url = 'https://api.coze.cn/v3/chat'
     payload = {
         "bot_id": coze_bot_id,
@@ -36,9 +38,9 @@ def fetch_news_from_coze():
             
         chat_id = res['data']['id']
         conversation_id = res['data']['conversation_id']
-        print("✅ 任务已下达，等待特工汇总数据...")
+        print("✅ 任务已下达，特工正在深度检索全网数据 (内容较多，需耐心等待)...")
         
-        # 轮询查岗：问 AI 抓完没有
+        # 【第二步】轮询查岗：问 AI 抓完没有
         retrieve_url = f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}'
         while True:
             ret = requests.get(retrieve_url, headers=headers).json()
@@ -49,9 +51,11 @@ def fetch_news_from_coze():
             elif status in ['failed', 'canceled', 'requires_action']:
                 print(f"❌ 抓取任务异常中断，状态: {status}")
                 return None
+            
+            # 没完成的话，等 2 秒再查一遍
             time.sleep(2)
             
-        # 任务确认完成后，去收发室取信件（提取最终结果）
+        # 【第三步】任务确认完成后，提取最终结果
         msg_url = f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}'
         msgs_res = requests.get(msg_url, headers=headers).json()
         
@@ -74,17 +78,19 @@ def fetch_news_from_coze():
     except Exception as e:
         print(f"❌ 抓取异常: {e}")
         return None
+
 def push_to_wechat(data):
+    # 确保拿到的是字典格式的数据
     if not data or not isinstance(data, dict):
         print("⚠️ 获取的数据格式不对，取消推送。")
         return
 
-    print("✅ 数据解析成功，正在排版...")
+    print("✅ 数据解析成功，正在进行详实排版...")
     
     # 标题
     msg_content = "## 🎙️ 全球宏观与市场行情详报\n\n---\n"
     
-    # 1. 宏观要闻 (放到最前，并扩充数量)
+    # 1. 宏观要闻 (放到最前，扩充数量)
     msg_content += "### 📌 【今日核心要闻】\n"
     top_news = data.get('top_news', [])
     for idx, item in enumerate(top_news, 1):
@@ -121,28 +127,30 @@ def push_to_wechat(data):
     else:
         msg_content += "- 暂无异动或重大投资简报\n\n"
 
-    url = '[http://www.pushplus.plus/send](http://www.pushplus.plus/send)'
+    # 发送给微信 PushPlus
+    url = 'http://www.pushplus.plus/send'
     push_data = {
         "token": pushplus_token,
-        "title": "🎙️ 今日全球宏观与市场详报已送达",
+        "title": "🎙️ 今日全球宏观与市场详报",
         "content": msg_content,
         "template": "markdown"
     }
     
-    res = requests.post(url, json=push_data)
-    if res.json().get('code') == 200:
-        print("🚀 推送成功！请查收微信！")
-    else:
-        print(f"❌ 推送失败：{res.json()}")
-
- 
-
+    try:
+        res = requests.post(url, json=push_data)
+        if res.json().get('code') == 200:
+            print("🚀 推送成功！请查收微信！")
+        else:
+            print(f"❌ 推送失败：{res.json()}")
+    except Exception as e:
+        print(f"❌ 推送请求异常: {e}")
 
 if __name__ == '__main__':
+    # 第一步：抓取
     report_data = fetch_news_from_coze()
+    
+    # 第二步：推送
     if report_data:
         push_to_wechat(report_data)
     else:
         print("流程异常结束。")
-
-
