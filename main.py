@@ -1,94 +1,113 @@
 import os
 import requests
+import json
+import re
 
-def test_secrets():
-    print("🚀 开始执行 Secrets 体检...\n")
+# ==========================================
+# 1. 读取我们的“通行证”
+# ==========================================
+coze_token = os.getenv('COZE_API_TOKEN')
+coze_bot_id = os.getenv('COZE_BOT_ID')
+pushplus_token = os.getenv('PUSHPLUS_TOKEN')
 
-    # 1. 尝试从 GitHub 环境中读取变量
-    coze_token = os.getenv('COZE_API_TOKEN')
-    coze_bot_id = os.getenv('COZE_BOT_ID')
-    pushplus_token = os.getenv('PUSHPLUS_TOKEN')
+# ==========================================
+# 2. 定义你想抓取的主题（随时可以改！）
+# ==========================================
+# 你可以在这里写特定网址，也可以写全网搜索的关键词
+SEARCH_PROMPT = """
+请帮我抓取今天关于以下几个主题的最新重要新闻，总共精选 5-8 条即可：
+1. 半导体与芯片行业动态
+2. A股市场重磅宏观消息
+3. AI人工智能最新进展
 
-    # ==========================================
-    # 第一关：检查变量是否成功读取
-    # ==========================================
-    print("--- 第一关：检查 GitHub Secrets 是否成功加载 ---")
-    if coze_token:
-        # 故意只打印长度，防止 Token 泄露在日志里
-        print(f"✅ COZE_API_TOKEN: 已读取 (长度: {len(coze_token)})")
-    else:
-        print("❌ COZE_API_TOKEN: 未读取到！请检查 Secrets 名字是否拼写正确。")
+请务必使用插件进行全网搜索。
+严格输出纯 JSON 数组格式，不要有任何多余的开场白。
+JSON字段需包含：title(标题), summary(摘要,50字左右), url(链接), time(时间)。
+"""
 
-    if coze_bot_id:
-        print(f"✅ COZE_BOT_ID: 已读取 ({coze_bot_id})")
-    else:
-        print("❌ COZE_BOT_ID: 未读取到！")
+def fetch_news_from_coze():
+    print("🕵️‍♂️ 正在派出 Coze 特工潜入全网搜集情报...")
+    url = 'https://api.coze.cn/v3/chat'
+    headers = {
+        'Authorization': f'Bearer {coze_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        "bot_id": coze_bot_id,
+        "user_id": "quant_master", # 给你起个霸气的代号
+        "stream": False,
+        "additional_messages": [{"role": "user", "content": SEARCH_PROMPT, "content_type": "text"}]
+    }
 
-    if pushplus_token:
-        print("✅ PUSHPLUS_TOKEN: 已读取")
-    else:
-        print("⚠️ PUSHPLUS_TOKEN: 未读取到 (如果你暂时没配微信推送，可忽略此项)")
-    print("\n")
-
-    # ==========================================
-    # 第二关：验证 Coze API 连通性
-    # ==========================================
-    print("--- 第二关：验证 扣子 (Coze) API 权限与 Bot ID ---")
-    if coze_token and coze_bot_id:
-        try:
-            url = 'https://api.coze.cn/v3/chat'
-            headers = {
-                'Authorization': f'Bearer {coze_token}',
-                'Content-Type': 'application/json'
-            }
-            # 发送一个极其简单的问候，只为了测试能不能接通
-            payload = {
-                "bot_id": coze_bot_id,
-                "user_id": "test_runner",
-                "stream": False,
-                "additional_messages": [{"role": "user", "content": "hi", "content_type": "text"}]
-            }
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        res_json = response.json()
+        
+        # 提取回答内容
+        content = ""
+        for msg in res_json.get('data', {}).get('messages', []):
+            if msg.get('type') == 'answer':
+                content = msg.get('content')
+                break
+        
+        print("📥 收到情报，正在解码...")
+        
+        # 核心：用正则表达式把 JSON 抠出来，防止 AI 说废话导致报错
+        json_match = re.search(r'\[.*\]', content, re.DOTALL)
+        if json_match:
+            news_list = json.loads(json_match.group())
+            return news_list
+        else:
+            print("❌ 解码失败，AI 返回的内容不是标准 JSON。返回原文看一眼：")
+            print(content)
+            return None
             
-            print("正在向 Coze 发起握手请求...")
-            response = requests.post(url, headers=headers, json=payload)
-            res_json = response.json()
-            
-            # HTTP 状态码 200 且业务 code 为 0 代表完美成功
-            if response.status_code == 200 and res_json.get("code") == 0:
-                print("✅ Coze 接口测试通关！成功跨过反爬保安，与 Bot 建立连接。")
-            else:
-                print(f"❌ Coze 接口报错啦！\nHTTP状态码: {response.status_code}\n详细返回: {res_json}")
-        except Exception as e:
-            print(f"❌ 请求发生严重异常: {e}")
-    else:
-        print("⏭️ 因缺少 Coze Token 或 Bot ID，跳过接口验证。")
-    print("\n")
+    except Exception as e:
+        print(f"❌ 抓取过程中遭遇未知阻击: {e}")
+        return None
 
-    # ==========================================
-    # 第三关：验证 PushPlus 微信推送 (可选)
-    # ==========================================
-    print("--- 第三关：验证 PushPlus 推送 ---")
-    if pushplus_token:
-        try:
-            url = 'http://www.pushplus.plus/send'
-            data = {
-                "token": pushplus_token,
-                "title": "✅ 自动化链路打通测试",
-                "content": "恭喜！如果你在微信里看到了这条消息，说明你的 GitHub Secrets 配置完全正确，自动化工作流已经跑通了！",
-                "template": "html"
-            }
-            response = requests.post(url, json=data)
-            res_json = response.json()
-            if res_json.get("code") == 200:
-                print("✅ PushPlus 推送成功！请看一眼微信是否收到了消息。")
-            else:
-                print(f"❌ PushPlus 推送失败: {res_json}")
-        except Exception as e:
-            print(f"❌ PushPlus 请求异常: {e}")
-    else:
-        print("⏭️ 未配置 PushPlus Token，跳过测试。")
+def push_to_wechat(news_list):
+    if not news_list:
+        print("⚠️ 报告老板，今天没有获取到有效新闻，放弃推送。")
+        return
 
-    print("\n🎉 体检结束！")
+    print(f"✅ 成功解析 {len(news_list)} 条新闻，正在排版发往微信...")
+    
+    # 将 JSON 数据组装成 Markdown 格式的漂亮推文
+    msg_content = "## 📈 您的专属财经与科技早报\n\n"
+    
+    for idx, item in enumerate(news_list, 1):
+        title = item.get('title', '未知标题')
+        summary = item.get('summary', '无摘要内容')
+        url = item.get('url', '#')
+        time = item.get('time', '刚刚')
+        
+        msg_content += f"### {idx}. {title}\n"
+        msg_content += f"⏱ **时间**: {time}\n\n"
+        msg_content += f"📝 **摘要**: {summary}\n\n"
+        msg_content += f"🔗 [点击阅读原文]({url})\n\n"
+        msg_content += "---\n"
+
+    url = 'http://www.pushplus.plus/send'
+    data = {
+        "token": pushplus_token,
+        "title": "📰 今日核心情报已送达",
+        "content": msg_content,
+        "template": "markdown" # 使用 markdown 模板，微信里看非常清爽
+    }
+    
+    res = requests.post(url, json=data)
+    if res.json().get('code') == 200:
+        print("🚀 推送成功！请查收微信！")
+    else:
+        print(f"❌ 推送失败：{res.json()}")
 
 if __name__ == '__main__':
-    test_secrets()
+    # 1. 抓取新闻
+    news_data = fetch_news_from_coze()
+    
+    # 2. 推送微信
+    if news_data:
+        push_to_wechat(news_data)
+    else:
+        print("流程异常结束。")
