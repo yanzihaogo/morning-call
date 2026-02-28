@@ -31,9 +31,6 @@ SEARCH_PROMPT = f"""
 3. 严格按预设 JSON 格式返回。
 """
 
-# ==========================================
-# 3. 抓取逻辑 (Coze 特工)
-# ==========================================
 def fetch_news_from_coze():
     print(f"🕵️‍♂️ 正在潜入全网搜集 {today_str} 的客观行情情报...")
     headers = {
@@ -93,48 +90,66 @@ def fetch_news_from_coze():
         return None
 
 # ==========================================
-# 4. 生成专供语音朗读的纯文本台本
+# 专用函数：清洗准备给语音朗读的文本
+# ==========================================
+def clean_for_speech(text):
+    if not text:
+        return "无内容"
+    # 剔除所有的 http 链接
+    text = re.sub(r'http[s]?://\S+', '', text)
+    # 剔除包含“来源”或“链接”的常见字眼
+    text = re.sub(r'来源链接[:：]?\s*', '', text)
+    text = re.sub(r'数据来源[:：]?\s*', '', text)
+    # 剔除 Markdown 图片和链接符号格式 [文字](链接)
+    text = re.sub(r'\[.*?\]\(.*?\)', '', text)
+    return text.strip()
+
+# ==========================================
+# 生成专供语音朗读的纯文本台本
 # ==========================================
 def format_text_for_audio(data):
-    # 模拟电台主播口吻
     script = f"早上好！今天是{today_str}。欢迎收听今日全球宏观与市场详报。\n\n"
     
     script += "首先为您播报今日核心要闻。\n"
     for idx, item in enumerate(data.get('top_news', []), 1):
-        script += f"第{idx}条，{item.get('title', '无标题')}。{item.get('summary', '无摘要')}\n\n"
+        # 经过严格的清洗，确保没有任何乱七八糟的链接被读出来
+        clean_title = clean_for_speech(item.get('title', '无标题'))
+        clean_summary = clean_for_speech(item.get('summary', '无摘要'))
+        script += f"第{idx}条，{clean_title}。{clean_summary}\n\n"
     
     script += "接下来是市场情绪与焦点观察。\n"
-    script += f"{data.get('market_focus', '暂无观察数据')}\n\n"
+    script += f"{clean_for_speech(data.get('market_focus', '暂无观察数据'))}\n\n"
 
     script += "主要市场行情综述方面。\n"
     indices = data.get('market_indices', {})
-    script += f"沪深A股：{indices.get('A_shares', '暂无数据')}\n"
-    script += f"港股市场：{indices.get('HK_shares', '暂无数据')}\n"
-    script += f"美股市场：{indices.get('US_shares', '暂无数据')}\n\n"
+    script += f"沪深A股：{clean_for_speech(indices.get('A_shares', '暂无数据'))}\n"
+    script += f"港股市场：{clean_for_speech(indices.get('HK_shares', '暂无数据'))}\n"
+    script += f"美股市场：{clean_for_speech(indices.get('US_shares', '暂无数据'))}\n\n"
 
     script += "大宗商品期货方面。\n"
     commodities = data.get('commodities', {})
-    script += f"黄金：{commodities.get('gold', '暂无数据')}\n"
-    script += f"白银：{commodities.get('silver', '暂无数据')}\n"
-    script += f"原油：{commodities.get('crude_oil', '暂无数据')}\n\n"
+    script += f"黄金：{clean_for_speech(commodities.get('gold', '暂无数据'))}\n"
+    script += f"白银：{clean_for_speech(commodities.get('silver', '暂无数据'))}\n"
+    script += f"原油：{clean_for_speech(commodities.get('crude_oil', '暂无数据'))}\n\n"
     
     script += "最后为您带来市场脉搏简报。\n"
     briefings = data.get('briefings', [])
     if briefings:
         for b in briefings:
-            script += f"{b.get('category', '简报')}：{b.get('content', '无内容')}\n"
+            cat = clean_for_speech(b.get('category', '简报'))
+            con = clean_for_speech(b.get('content', '无内容'))
+            script += f"{cat}：{con}\n"
     
     script += "\n以上就是今天的全部内容，感谢您的收听，祝您生活愉快。"
     return script
 
 # ==========================================
-# 5. 合成语音 MP3
+# 合成语音 MP3
 # ==========================================
 async def generate_audio(audio_script):
     print("🎙️ 正在召唤 AI 播音员 (晓晓) 录制新闻音频...")
-    voice = "zh-CN-XiaoxiaoNeural" # 微软晓晓，知性女声
+    voice = "zh-CN-XiaoxiaoNeural"
     output_file = "daily_news.mp3"
-    
     try:
         communicate = edge_tts.Communicate(audio_script, voice, rate="+5%")
         await communicate.save(output_file)
@@ -145,34 +160,36 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 6. 上传 MP3 到云端获取链接
+# 上传 MP3 到云端获取链接 (增加防拦截机制)
 # ==========================================
 def upload_audio(file_path):
     print("☁️ 正在将音频上传至云端生成播放链接...")
     try:
         with open(file_path, 'rb') as f:
-            # 使用 catbox 免费文件托管服务
             files = {'fileToUpload': f}
             data = {'reqtype': 'fileupload'}
-            res = requests.post('https://catbox.moe/user/api.php', data=data, files=files, timeout=30)
+            # 戴上“人类面具”，防止被网盘当成机器人拦截
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            }
+            res = requests.post('https://catbox.moe/user/api.php', data=data, files=files, headers=headers, timeout=60)
             if res.status_code == 200:
-                audio_url = res.text
+                audio_url = res.text.strip()
                 print(f"✅ 音频上传成功！链接: {audio_url}")
                 return audio_url
             else:
-                print(f"❌ 上传失败，状态码: {res.status_code}")
+                print(f"❌ 上传失败，服务器返回状态码: {res.status_code}")
+                print(f"错误详情: {res.text}")
                 return None
     except Exception as e:
         print(f"❌ 上传过程发生异常: {e}")
         return None
 
 # ==========================================
-# 7. 生成微信文字排版并推送 (带语音链接版)
+# 生成微信文字排版并推送 (带语音链接版)
 # ==========================================
 def format_and_push_wechat(data, audio_link):
     print("📲 正在排版并推送至微信...")
-    
-    # 【核心改动】：顶部的日期前缀与语音播报入口
     msg_content = f"## 📅 {today_str} - 🎙️ 您的专属宏观与市场早报\n\n"
     
     if audio_link:
@@ -180,7 +197,6 @@ def format_and_push_wechat(data, audio_link):
     else:
         msg_content += "*(⚠️ 今日音频生成或上传失败，请阅读以下文字版)*\n\n---\n\n"
     
-    # 下方保留文字版，方便扫读
     msg_content += "### 📌 【今日核心要闻】\n"
     for idx, item in enumerate(data.get('top_news', []), 1):
         msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
@@ -211,7 +227,6 @@ def format_and_push_wechat(data, audio_link):
     else:
         msg_content += "- 暂无异动或重大投资简报\n\n"
 
-    # 推送请求
     url = 'http://www.pushplus.plus/send'
     push_data = {
         "token": pushplus_token,
@@ -233,26 +248,21 @@ def format_and_push_wechat(data, audio_link):
 # 🚀 主运行控制台
 # ==========================================
 async def main():
-    # 1. 抓取数据
     report_data = fetch_news_from_coze()
     if not report_data:
         print("流程异常结束：未获取到有效数据。")
         return
 
-    # 2. 生成语音台本
+    # 语音台本已接入“清洗机”
     audio_script = format_text_for_audio(report_data)
 
-    # 3. 合成 MP3 音频文件
     audio_file_path = await generate_audio(audio_script)
     
-    # 4. 上传音频获取云端链接
     audio_link = None
     if audio_file_path:
         audio_link = upload_audio(audio_file_path)
 
-    # 5. 生成图文排版并合并链接推送到微信
     format_and_push_wechat(report_data, audio_link)
-    
     print("🎉 今日全部自动化任务圆满完成！")
 
 if __name__ == '__main__':
