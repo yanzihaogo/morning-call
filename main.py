@@ -23,6 +23,9 @@ sender_email = os.getenv('SENDER_EMAIL')
 sender_password = os.getenv('SENDER_PASSWORD') 
 receiver_email = os.getenv('RECEIVER_EMAIL')   
 
+# ✅ 新增：抄送邮箱地址
+cc_email = "15757699818@163.com"
+
 # ==========================================
 # 2. 动态生成时间，引入“弹性时间窗”解决周一黑洞
 # ==========================================
@@ -187,7 +190,7 @@ def format_text_for_email(data):
     return msg_content
 
 # ==========================================
-# 6. 生成供 PushPlus 监控的排版 (已补全所有板块！)
+# 6. 生成供 PushPlus 监控的排版
 # ==========================================
 def format_text_for_monitor(data, email_status):
     msg_content = f"## ⏱️ [监控] {today_str} 早报生成完毕\n\n"
@@ -240,7 +243,7 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 8. 发送邮件并返回状态
+# 8. 发送邮件并返回状态 (已加入抄送逻辑)
 # ==========================================
 def send_email_with_attachment(email_body, attachment_path):
     print("📧 正在打包邮件并发送...")
@@ -252,6 +255,7 @@ def send_email_with_attachment(email_body, attachment_path):
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
+    msg['Cc'] = cc_email  # ✅ 新增：在邮件头显示抄送人
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
     msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
 
@@ -267,9 +271,13 @@ def send_email_with_attachment(email_body, attachment_path):
     try:
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, receiver_email, msg.as_string())
+        
+        # ✅ 新增：将收件人和抄送人合并成一个列表进行发送
+        to_addrs = [receiver_email, cc_email]
+        server.sendmail(sender_email, to_addrs, msg.as_string())
+        
         server.quit()
-        success_msg = f"✅ 邮件已成功包含 MP3 附件发送"
+        success_msg = f"✅ 邮件已成功包含 MP3 附件发送至 {receiver_email} 并抄送 {cc_email}"
         print(success_msg)
         return success_msg
     except Exception as e:
@@ -312,7 +320,7 @@ async def main():
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    # 2. 发送目标邮件
+    # 2. 发送目标邮件 (主收件人+抄送)
     email_text = format_text_for_email(report_data)
     email_status = send_email_with_attachment(email_text, audio_file_path)
 
