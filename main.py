@@ -12,16 +12,16 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 读取我们的“通行证”与“邮箱配置”
+# 1. 读取我们的“通行证”与“配置”
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
+pushplus_token = os.getenv('PUSHPLUS_TOKEN') # 监控通道
 
-# 新增的邮件配置（稍后需要在 GitHub Secrets 里配置）
-smtp_server = os.getenv('SMTP_SERVER')       # 例如: smtp.qq.com 或 smtp.163.com
-sender_email = os.getenv('SENDER_EMAIL')     # 你的发件邮箱地址
-sender_password = os.getenv('SENDER_PASSWORD') # 你的邮箱授权码（注意：不是登录密码）
-receiver_email = os.getenv('RECEIVER_EMAIL')   # 你父亲的收件邮箱地址
+smtp_server = os.getenv('SMTP_SERVER')       
+sender_email = os.getenv('SENDER_EMAIL')     
+sender_password = os.getenv('SENDER_PASSWORD') 
+receiver_email = os.getenv('RECEIVER_EMAIL')   
 
 # ==========================================
 # 2. 动态生成时间，锁定24小时内的新闻
@@ -188,7 +188,30 @@ def format_text_for_email(data):
     return msg_content
 
 # ==========================================
-# 6. 合成语音 MP3
+# 6. 生成供 PushPlus 监控的排版
+# ==========================================
+def format_text_for_monitor(data, email_status):
+    msg_content = f"## ⏱️ [监控] {today_str} 早报生成完毕\n\n"
+    msg_content += f"**发信状态**：{email_status}\n\n---\n\n"
+    
+    msg_content += "### 📌 【今日核心要闻】\n"
+    for idx, item in enumerate(data.get('top_news', []), 1):
+        msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
+        msg_content += f"> {item.get('summary', '无摘要')}\n\n"
+    
+    msg_content += "### 👁️ 【市场情绪与焦点观察】\n"
+    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n\n---\n"
+
+    indices = data.get('market_indices', {})
+    msg_content += "### 🌐 【主要市场行情综述】\n"
+    msg_content += f"- **🇨🇳 沪深 A 股**: {indices.get('A_shares', '暂无数据')}\n"
+    msg_content += f"- **🇭🇰 港股市场**: {indices.get('HK_shares', '暂无数据')}\n"
+    msg_content += f"- **🇺🇸 美股市场**: {indices.get('US_shares', '暂无数据')}\n\n---\n"
+
+    return msg_content
+
+# ==========================================
+# 7. 合成语音 MP3
 # ==========================================
 async def generate_audio(audio_script):
     print("🎙️ 正在召唤 AI 播音员 (晓晓) 录制新闻音频...")
@@ -204,48 +227,64 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 7. 核心：发送带附件的邮件
+# 8. 发送邮件并返回状态
 # ==========================================
 def send_email_with_attachment(email_body, attachment_path):
     print("📧 正在打包邮件并发送...")
-    
-    # 检查环境变量是否配置齐全
     if not all([smtp_server, sender_email, sender_password, receiver_email]):
-        print("❌ 邮件配置不全！请检查 GitHub Secrets 中的 SMTP_SERVER, SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL。")
-        return
+        error_msg = "❌ 邮件配置不全！"
+        print(error_msg)
+        return error_msg
 
-    # 构建邮件主体
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
-
-    # 添加邮件正文
     msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
 
-    # 添加 MP3 附件
     if attachment_path and os.path.exists(attachment_path):
         try:
             with open(attachment_path, "rb") as f:
                 part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
             part['Content-Disposition'] = f'attachment; filename="Morning_Call_{today_str}.mp3"'
             msg.attach(part)
-            print("✅ 附件已成功挂载。")
         except Exception as e:
             print(f"❌ 挂载附件时发生错误: {e}")
-    else:
-        print("⚠️ 未找到音频文件，将仅发送纯文本邮件。")
 
-    # 连接 SMTP 服务器并发送
     try:
-        # 大多数主流邮箱使用 465 端口和 SSL
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, receiver_email, msg.as_string())
         server.quit()
-        print("🎉 邮件发送成功！请查收邮箱！")
+        success_msg = f"✅ 邮件已成功包含 MP3 附件发送至 {receiver_email}"
+        print(success_msg)
+        return success_msg
     except Exception as e:
-        print(f"❌ 邮件发送失败: {e}")
+        error_msg = f"❌ 邮件发送失败: {e}"
+        print(error_msg)
+        return error_msg
+
+# ==========================================
+# 9. 发送 PushPlus 监控通知
+# ==========================================
+def send_pushplus_monitor(content):
+    if not pushplus_token:
+        print("⏭️ 未配置 PushPlus Token，跳过监控推送。")
+        return
+        
+    print("📲 正在发送监控数据到微信...")
+    url = 'http://www.pushplus.plus/send'
+    push_data = {
+        "token": pushplus_token,
+        "title": f"⏱️ [监控] {today_str} 早报生成状态",
+        "content": content,
+        "template": "markdown"
+    }
+    try:
+        requests.post(url, json=push_data)
+        print("✅ 监控推文已送达微信！")
+    except Exception as e:
+        print(f"❌ 监控推送异常: {e}")
 
 # ==========================================
 # 🚀 主运行控制台
@@ -253,18 +292,20 @@ def send_email_with_attachment(email_body, attachment_path):
 async def main():
     report_data = fetch_news_from_coze()
     if not report_data:
-        print("流程异常结束：未获取到有效数据。")
+        send_pushplus_monitor("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
-    # 生成邮件图文排版
-    email_text = format_text_for_email(report_data)
-
-    # 语音台本清洗并录制
+    # 1. 音频合成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    # 发送带附件的终极邮件
-    send_email_with_attachment(email_text, audio_file_path)
+    # 2. 发送目标邮件
+    email_text = format_text_for_email(report_data)
+    email_status = send_email_with_attachment(email_text, audio_file_path)
+
+    # 3. 发送微信监控
+    monitor_content = format_text_for_monitor(report_data, email_status)
+    send_pushplus_monitor(monitor_content)
 
 if __name__ == '__main__':
     asyncio.run(main())
