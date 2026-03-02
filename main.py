@@ -5,14 +5,23 @@ import re
 import time
 import asyncio
 import edge_tts
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 读取我们的“通行证”
+# 1. 读取我们的“通行证”与“邮箱配置”
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
-pushplus_token = os.getenv('PUSHPLUS_TOKEN')
+
+# 新增的邮件配置（稍后需要在 GitHub Secrets 里配置）
+smtp_server = os.getenv('SMTP_SERVER')       # 例如: smtp.qq.com 或 smtp.163.com
+sender_email = os.getenv('SENDER_EMAIL')     # 你的发件邮箱地址
+sender_password = os.getenv('SENDER_PASSWORD') # 你的邮箱授权码（注意：不是登录密码）
+receiver_email = os.getenv('RECEIVER_EMAIL')   # 你父亲的收件邮箱地址
 
 # ==========================================
 # 2. 动态生成时间，锁定24小时内的新闻
@@ -31,6 +40,9 @@ SEARCH_PROMPT = f"""
 3. 严格按预设 JSON 格式返回。
 """
 
+# ==========================================
+# 3. 抓取逻辑 (Coze 特工)
+# ==========================================
 def fetch_news_from_coze():
     print(f"🕵️‍♂️ 正在潜入全网搜集 {today_str} 的客观行情情报...")
     headers = {
@@ -90,7 +102,7 @@ def fetch_news_from_coze():
         return None
 
 # ==========================================
-# 专用函数：清洗准备给语音朗读的文本
+# 4. 生成专供语音朗读的清洗版台本
 # ==========================================
 def clean_for_speech(text):
     if not text:
@@ -101,9 +113,6 @@ def clean_for_speech(text):
     text = re.sub(r'\[.*?\]\(.*?\)', '', text)
     return text.strip()
 
-# ==========================================
-# 生成专供语音朗读的纯文本台本
-# ==========================================
 def format_text_for_audio(data):
     script = f"早上好！今天是{today_str}。欢迎收听今日全球宏观与市场详报。\n\n"
     
@@ -140,7 +149,46 @@ def format_text_for_audio(data):
     return script
 
 # ==========================================
-# 合成语音 MP3
+# 5. 生成供邮件阅读的图文排版
+# ==========================================
+def format_text_for_email(data):
+    msg_content = f"【{today_str} - 您的专属宏观与市场早报】\n\n"
+    msg_content += "🎧 语音播报已作为附件发送，请点击下方附件收听。\n\n"
+    msg_content += "-" * 30 + "\n\n"
+    
+    msg_content += "📌 【今日核心要闻】\n"
+    for idx, item in enumerate(data.get('top_news', []), 1):
+        msg_content += f"{idx}. {item.get('title', '无标题')}\n"
+        msg_content += f"   摘要：{item.get('summary', '无摘要')}\n"
+        msg_content += f"   来源：{item.get('url', '无链接')}\n\n"
+    
+    msg_content += "👁️ 【市场情绪与焦点观察】\n"
+    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n\n"
+
+    indices = data.get('market_indices', {})
+    msg_content += "🌐 【主要市场行情综述】\n"
+    msg_content += f"🇨🇳 沪深 A 股: {indices.get('A_shares', '暂无数据')}\n"
+    msg_content += f"🇭🇰 港股市场: {indices.get('HK_shares', '暂无数据')}\n"
+    msg_content += f"🇺🇸 美股市场: {indices.get('US_shares', '暂无数据')}\n\n"
+
+    commodities = data.get('commodities', {})
+    msg_content += "🛢️ 【大宗商品期货综述】\n"
+    msg_content += f"🥇 黄金: {commodities.get('gold', '暂无数据')}\n"
+    msg_content += f"🥈 白银: {commodities.get('silver', '暂无数据')}\n"
+    msg_content += f"🛢️ 原油: {commodities.get('crude_oil', '暂无数据')}\n\n"
+    
+    msg_content += "📰 【市场脉搏简报】\n"
+    briefings = data.get('briefings', [])
+    if briefings:
+        for b in briefings:
+            msg_content += f"[{b.get('category', '简报')}] {b.get('content', '无内容')}\n"
+    else:
+        msg_content += "暂无异动或重大投资简报\n"
+
+    return msg_content
+
+# ==========================================
+# 6. 合成语音 MP3
 # ==========================================
 async def generate_audio(audio_script):
     print("🎙️ 正在召唤 AI 播音员 (晓晓) 录制新闻音频...")
@@ -156,86 +204,48 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 上传 MP3 到云端获取链接 (更换 tmpfiles.org)
+# 7. 核心：发送带附件的邮件
 # ==========================================
-def upload_audio(file_path):
-    print("☁️ 正在尝试将音频上传至备用云端 (tmpfiles.org) 生成播放链接...")
-    try:
-        with open(file_path, 'rb') as f:
-            files = {'file': f}
-            res = requests.post('https://tmpfiles.org/api/v1/upload', files=files, timeout=60)
-            
-            if res.status_code == 200:
-                res_json = res.json()
-                if res_json.get('status') == 'success':
-                    audio_url = res_json['data']['url']
-                    print(f"✅ 音频上传成功！链接: {audio_url}")
-                    return audio_url
-            
-            print(f"❌ 上传失败，服务器返回: {res.text}")
-            return None
-    except Exception as e:
-        print(f"❌ 上传过程发生异常: {e}")
-        return None
-
-# ==========================================
-# 生成微信文字排版并推送 (带语音链接版)
-# ==========================================
-def format_and_push_wechat(data, audio_link):
-    print("📲 正在排版并推送至微信...")
-    msg_content = f"## 📅 {today_str} - 🎙️ 您的专属宏观与市场早报\n\n"
+def send_email_with_attachment(email_body, attachment_path):
+    print("📧 正在打包邮件并发送...")
     
-    if audio_link:
-        msg_content += f"### 👉 **[点击此处，收听今日早报语音版]({audio_link})** 👈\n\n---\n\n"
+    # 检查环境变量是否配置齐全
+    if not all([smtp_server, sender_email, sender_password, receiver_email]):
+        print("❌ 邮件配置不全！请检查 GitHub Secrets 中的 SMTP_SERVER, SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL。")
+        return
+
+    # 构建邮件主体
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
+
+    # 添加邮件正文
+    msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
+
+    # 添加 MP3 附件
+    if attachment_path and os.path.exists(attachment_path):
+        try:
+            with open(attachment_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part['Content-Disposition'] = f'attachment; filename="Morning_Call_{today_str}.mp3"'
+            msg.attach(part)
+            print("✅ 附件已成功挂载。")
+        except Exception as e:
+            print(f"❌ 挂载附件时发生错误: {e}")
     else:
-        msg_content += "*(⚠️ 今日音频生成或上传失败，请阅读以下文字版)*\n\n---\n\n"
-    
-    msg_content += "### 📌 【今日核心要闻】\n"
-    for idx, item in enumerate(data.get('top_news', []), 1):
-        msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
-        msg_content += f"> {item.get('summary', '无摘要')}\n"
-        msg_content += f"[🔗 来源链接]({item.get('url', '#')})\n\n"
-    msg_content += "---\n"
-    
-    msg_content += "### 👁️ 【市场情绪与焦点观察】\n"
-    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n\n---\n"
+        print("⚠️ 未找到音频文件，将仅发送纯文本邮件。")
 
-    indices = data.get('market_indices', {})
-    msg_content += "### 🌐 【主要市场行情综述】\n"
-    msg_content += f"- **🇨🇳 沪深 A 股**\n  {indices.get('A_shares', '暂无数据')}\n\n"
-    msg_content += f"- **🇭🇰 港股市场**\n  {indices.get('HK_shares', '暂无数据')}\n\n"
-    msg_content += f"- **🇺🇸 美股市场**\n  {indices.get('US_shares', '暂无数据')}\n\n---\n"
-
-    commodities = data.get('commodities', {})
-    msg_content += "### 🛢️ 【大宗商品期货综述】\n"
-    msg_content += f"- **🥇 黄金**\n  {commodities.get('gold', '暂无数据')}\n\n"
-    msg_content += f"- **🥈 白银**\n  {commodities.get('silver', '暂无数据')}\n\n"
-    msg_content += f"- **🛢️ 原油**\n  {commodities.get('crude_oil', '暂无数据')}\n\n---\n"
-    
-    msg_content += "### 📰 【市场脉搏简报】\n"
-    briefings = data.get('briefings', [])
-    if briefings:
-        for b in briefings:
-            msg_content += f"- **[{b.get('category', '简报')}]** {b.get('content', '无内容')}\n\n"
-    else:
-        msg_content += "- 暂无异动或重大投资简报\n\n"
-
-    url = 'http://www.pushplus.plus/send'
-    push_data = {
-        "token": pushplus_token,
-        "title": f"🎙️ {today_str} 宏观市场早报已送达",
-        "content": msg_content,
-        "template": "markdown"
-    }
-    
+    # 连接 SMTP 服务器并发送
     try:
-        res = requests.post(url, json=push_data)
-        if res.json().get('code') == 200:
-            print("✅ 微信推送成功！请查收！")
-        else:
-            print(f"❌ 微信推送失败：{res.json()}")
+        # 大多数主流邮箱使用 465 端口和 SSL
+        server = smtplib.SMTP_SSL(smtp_server, 465)
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+        server.quit()
+        print("🎉 邮件发送成功！请查收邮箱！")
     except Exception as e:
-        print(f"❌ 推送请求异常: {e}")
+        print(f"❌ 邮件发送失败: {e}")
 
 # ==========================================
 # 🚀 主运行控制台
@@ -246,16 +256,15 @@ async def main():
         print("流程异常结束：未获取到有效数据。")
         return
 
-    audio_script = format_text_for_audio(report_data)
+    # 生成邮件图文排版
+    email_text = format_text_for_email(report_data)
 
+    # 语音台本清洗并录制
+    audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    audio_link = None
-    if audio_file_path:
-        audio_link = upload_audio(audio_file_path)
-
-    format_and_push_wechat(report_data, audio_link)
-    print("🎉 今日全部自动化任务圆满完成！")
+    # 发送带附件的终极邮件
+    send_email_with_attachment(email_text, audio_file_path)
 
 if __name__ == '__main__':
     asyncio.run(main())
