@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
-pushplus_token = os.getenv('PUSHPLUS_TOKEN') # 监控通道
+pushplus_token = os.getenv('PUSHPLUS_TOKEN') 
 
 smtp_server = os.getenv('SMTP_SERVER')       
 sender_email = os.getenv('SENDER_EMAIL')     
@@ -24,19 +24,18 @@ sender_password = os.getenv('SENDER_PASSWORD')
 receiver_email = os.getenv('RECEIVER_EMAIL')   
 
 # ==========================================
-# 2. 动态生成时间，锁定24小时内的新闻
+# 2. 动态生成时间，引入“弹性时间窗”解决周一黑洞
 # ==========================================
 tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
-yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请立即执行每日宏观市场与商品行情数据深度抓取。
 
-【防重复死命令】：
-1. 搜索范围必须严格限定在 {yesterday_str} 到 {today_str} 这过去 24 小时内发生的新闻。
-2. 绝对不要播报几天前已经发酵过的旧新闻，除非今天有重大的、实质性的最新进展。
+【防重复与时效性死命令】：
+1. 弹性搜索窗：请聚焦于过去 24 到 48 小时内的最新事件。如果今天是周一早晨，请务必涵盖上周五夜盘的美股/商品收盘情况以及周末发酵的重大宏观事件。
+2. 宁缺毋滥：绝对不要播报几天前已经充分发酵过的旧闻（除非今天有极其重大的最新反转或实质进展）。
 3. 严格按预设 JSON 格式返回。
 """
 
@@ -188,7 +187,7 @@ def format_text_for_email(data):
     return msg_content
 
 # ==========================================
-# 6. 生成供 PushPlus 监控的排版
+# 6. 生成供 PushPlus 监控的排版 (已补全所有板块！)
 # ==========================================
 def format_text_for_monitor(data, email_status):
     msg_content = f"## ⏱️ [监控] {today_str} 早报生成完毕\n\n"
@@ -207,6 +206,20 @@ def format_text_for_monitor(data, email_status):
     msg_content += f"- **🇨🇳 沪深 A 股**: {indices.get('A_shares', '暂无数据')}\n"
     msg_content += f"- **🇭🇰 港股市场**: {indices.get('HK_shares', '暂无数据')}\n"
     msg_content += f"- **🇺🇸 美股市场**: {indices.get('US_shares', '暂无数据')}\n\n---\n"
+
+    commodities = data.get('commodities', {})
+    msg_content += "### 🛢️ 【大宗商品期货综述】\n"
+    msg_content += f"- **🥇 黄金**: {commodities.get('gold', '暂无数据')}\n"
+    msg_content += f"- **🥈 白银**: {commodities.get('silver', '暂无数据')}\n"
+    msg_content += f"- **🛢️ 原油**: {commodities.get('crude_oil', '暂无数据')}\n\n---\n"
+    
+    msg_content += "### 📰 【市场脉搏简报】\n"
+    briefings = data.get('briefings', [])
+    if briefings:
+        for b in briefings:
+            msg_content += f"- **[{b.get('category', '简报')}]** {b.get('content', '无内容')}\n\n"
+    else:
+        msg_content += "- 暂无异动或重大投资简报\n\n"
 
     return msg_content
 
@@ -256,7 +269,7 @@ def send_email_with_attachment(email_body, attachment_path):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, receiver_email, msg.as_string())
         server.quit()
-        success_msg = f"✅ 邮件已成功包含 MP3 附件发送至 {receiver_email}"
+        success_msg = f"✅ 邮件已成功包含 MP3 附件发送"
         print(success_msg)
         return success_msg
     except Exception as e:
