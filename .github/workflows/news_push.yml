@@ -1,11 +1,10 @@
-name: 每日宏观早报抓取与语音合成
+name: 每日宏观早报抓取与双轨推送
 
 on:
   schedule:
-    # 避开 UTC 0:00 的全球大拥堵！
-    # 改为 UTC 的 23:45 (即北京时间早上 7:45) 触发
-    - cron: '49 23 * * *' 
-  workflow_dispatch: # 允许手动点击运行
+    # 避开 UTC 0:00，改为 UTC 的 23:45 (即北京时间早上 7:45)
+    - cron: '43 23 * * *' 
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -27,8 +26,10 @@ jobs:
 
       - name: Run News Scraper and Audio Generator
         env:
+          # 所有的环境变量都在这里
           COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
           COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
