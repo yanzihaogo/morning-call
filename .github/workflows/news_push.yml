@@ -3,7 +3,7 @@ name: 每日宏观早报抓取与双轨推送
 on:
   schedule:
     # 避开 UTC 0:00，改为 UTC 的 23:45 (即北京时间早上 7:45)
-    - cron: '43 23 * * *' 
+    - cron: '29 22 * * *' 
   workflow_dispatch: 
 
 jobs:
