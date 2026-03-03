@@ -23,23 +23,26 @@ sender_email = os.getenv('SENDER_EMAIL')
 sender_password = os.getenv('SENDER_PASSWORD') 
 receiver_email = os.getenv('RECEIVER_EMAIL')   
 
-# ✅ 新增：抄送邮箱地址
 cc_email = "15757699818@163.com"
 
 # ==========================================
-# 2. 动态生成时间，引入“弹性时间窗”解决周一黑洞
+# 2. 动态生成时间，锁定极其严格的时间窗
 # ==========================================
 tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
+yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
+# 极其严厉的反重复指令与“8点1氪”级内容采编标准
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请立即执行每日宏观市场与商品行情数据深度抓取。
 
-【防重复与时效性死命令】：
-1. 弹性搜索窗：请聚焦于过去 24 到 48 小时内的最新事件。如果今天是周一早晨，请务必涵盖上周五夜盘的美股/商品收盘情况以及周末发酵的重大宏观事件。
-2. 宁缺毋滥：绝对不要播报几天前已经充分发酵过的旧闻（除非今天有极其重大的最新反转或实质进展）。
-3. 严格按预设 JSON 格式返回。
+【核心纪律与质量标准】（必须严格遵守）：
+1. 强制搜索词加日期：调用搜索时，关键词必须包含“{today_str}”或“{yesterday_str}”。
+2. 强制时间戳过滤：必须核对【首次发生/发布时间】！只提取过去 24-48 小时内的【全新事件】。
+3. 彻底屏蔽“长尾旧闻”：绝对不允许炒冷饭（如已发布多日的GDP、降准等大宏观事件）。宁可找今天的突发小事件，也不拿旧闻凑数。
+4. 对标顶级早报充实【市场脉搏简报】：对标“36氪的8点1氪”或“华尔街见闻”风格，深度挖掘过去24小时内极具商业与投资价值的资讯。请强制输出 6 到 8 条简报！内容必须涵盖：科技巨头动作、前沿产业（AI、新能源、低空经济等）异动、重大投融资/并购、重磅行业政策。每条用一句话干净利落地说清主体和事件影响。
+5. 严格按预设 JSON 格式返回。
 """
 
 # ==========================================
@@ -243,7 +246,7 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 8. 发送邮件并返回状态 (已加入抄送逻辑)
+# 8. 发送邮件并返回状态
 # ==========================================
 def send_email_with_attachment(email_body, attachment_path):
     print("📧 正在打包邮件并发送...")
@@ -255,7 +258,7 @@ def send_email_with_attachment(email_body, attachment_path):
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
-    msg['Cc'] = cc_email  # ✅ 新增：在邮件头显示抄送人
+    msg['Cc'] = cc_email  
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
     msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
 
@@ -271,11 +274,8 @@ def send_email_with_attachment(email_body, attachment_path):
     try:
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
-        
-        # ✅ 新增：将收件人和抄送人合并成一个列表进行发送
         to_addrs = [receiver_email, cc_email]
         server.sendmail(sender_email, to_addrs, msg.as_string())
-        
         server.quit()
         success_msg = f"✅ 邮件已成功包含 MP3 附件发送至 {receiver_email} 并抄送 {cc_email}"
         print(success_msg)
@@ -316,15 +316,12 @@ async def main():
         send_pushplus_monitor("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
-    # 1. 音频合成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    # 2. 发送目标邮件 (主收件人+抄送)
     email_text = format_text_for_email(report_data)
     email_status = send_email_with_attachment(email_text, audio_file_path)
 
-    # 3. 发送微信监控
     monitor_content = format_text_for_monitor(report_data, email_status)
     send_pushplus_monitor(monitor_content)
 
