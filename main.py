@@ -12,7 +12,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 配置中心 (彻底移除 PushPlus，转为全面邮件化)
+# 1. 配置中心 
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
@@ -22,8 +22,8 @@ sender_email = os.getenv('SENDER_EMAIL')
 sender_password = os.getenv('SENDER_PASSWORD') 
 receiver_email = os.getenv('RECEIVER_EMAIL')   
 
-cc_email = "15757699818@163.com"     # 女朋友的抄送邮箱
-monitor_email = "779825335@qq.com"  # 你的监控邮箱 (发件箱同时抄送自己一份)
+cc_email = "15757699818@163.com"     
+monitor_email = "779825335@qq.com"  
 
 # ==========================================
 # 2. 动态生成时间，锁定极其严格的时间窗
@@ -33,16 +33,19 @@ now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
-# 【主编级采编指令】
+# 【投研主编级采编指令：植入预期差与板块推演】
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请执行每日全球宏观与产业资讯深度抓取。
 
-【采编硬性指标】：
-1. 📌【今日核心要闻】：数量必须控制在 3 到 5 条。
-   - 如果单一事件占据多条，请合并为一条。
-   - 必须横向搜寻：国内经济政策、美联储/欧央行动态、全球核心科技（AI/芯片）异动、大宗商品重大拐点等不同领域。
-2. 📰【市场脉搏简报】：对标“8点1氪”或“华尔街见闻”，强制输出 6 到 8 条极简商业资讯。内容涵盖科技巨头动作、前沿产业异动、重大投融资、重磅行业政策。
-3. 🛑【防旧闻过滤】：绝对禁止重复提及几天前已发生的旧闻（如准备金率下调、2025年GDP总结等）。只准报道过去 24-48 小时内的【新鲜进展】。
+【投研级采编硬性指标】（必须严格遵守）：
+1. 📌【今日核心要闻】（3-5条）：
+   - 核心要求：不要只报新闻通稿！必须带有“买方研究员”视角。
+   - 数据强制对比：遇到宏观数据或财报发布，必须明确列出“市场预期值 vs 实际公布值”，重点突出“预期差”。
+   - 资产与板块推演：在每条摘要（summary）的最后，必须单起一行，加上“🎯 核心逻辑与关注板块：”前缀，用一句话明确指出该事件利好/利空哪类宏观资产（如美元、美债、黄金），或建议重点关注A股/美股的什么具体产业链板块。
+2. 📰【市场脉搏简报】（6-8条）：
+   - 对标“华尔街见闻”的快讯精批。内容涵盖科技巨头动作、前沿产业异动、重大投融资、重磅行业政策。
+   - 在每条简报内容（content）的末尾，必须附带简短的“💡 异动短评：”，点透背后的资金博弈、产业链影响或交易逻辑。
+3. 🛑【防旧闻过滤】：绝对禁止报道 24-48 小时之前已充分消化的旧闻。只抓取最新发酵的事件。
 4. 严格按预设 JSON 格式返回。
 """
 
@@ -210,7 +213,7 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 7. 发送邮件并返回状态 (一键三发)
+# 7. 发送邮件并返回状态
 # ==========================================
 def send_email_with_attachment(email_body, attachment_path):
     print("📧 正在打包邮件并发送...")
@@ -221,7 +224,6 @@ def send_email_with_attachment(email_body, attachment_path):
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
-    # 将女朋友的邮箱和你的监控邮箱都加入抄送栏
     msg['Cc'] = f"{cc_email}, {monitor_email}"  
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
     msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
@@ -238,13 +240,10 @@ def send_email_with_attachment(email_body, attachment_path):
     try:
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
-        
-        # 将三个目标邮箱合并为一个发送列表
         to_addrs = [receiver_email, cc_email, monitor_email]
         server.sendmail(sender_email, to_addrs, msg.as_string())
-        
         server.quit()
-        print(f"✅ 邮件已成功包含 MP3 附件发送至父亲，并抄送至女朋友和你自己的邮箱！")
+        print(f"✅ 邮件已成功包含 MP3 附件发送！")
     except Exception as e:
         print(f"❌ 邮件发送失败: {e}")
 
@@ -257,11 +256,9 @@ async def main():
         print("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
-    # 1. 音频合成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    # 2. 发送邮件 (目标收件人 + 两个抄送)
     email_text = format_text_for_email(report_data)
     send_email_with_attachment(email_text, audio_file_path)
 
