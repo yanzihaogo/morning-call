@@ -12,18 +12,18 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 读取我们的“通行证”与“配置”
+# 1. 配置中心 (彻底移除 PushPlus，转为全面邮件化)
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
-pushplus_token = os.getenv('PUSHPLUS_TOKEN') 
 
 smtp_server = os.getenv('SMTP_SERVER')       
 sender_email = os.getenv('SENDER_EMAIL')     
 sender_password = os.getenv('SENDER_PASSWORD') 
 receiver_email = os.getenv('RECEIVER_EMAIL')   
 
-cc_email = "15757699818@163.com"
+cc_email = "15757699818@163.com"     # 女朋友的抄送邮箱
+monitor_email = "779825335@qq.com"  # 你的监控邮箱 (发件箱同时抄送自己一份)
 
 # ==========================================
 # 2. 动态生成时间，锁定极其严格的时间窗
@@ -33,23 +33,24 @@ now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
-# 极其严厉的反重复指令与“8点1氪”级内容采编标准
+# 【主编级采编指令】
 SEARCH_PROMPT = f"""
-今天是 {today_str}。请立即执行每日宏观市场与商品行情数据深度抓取。
+今天是 {today_str}。请执行每日全球宏观与产业资讯深度抓取。
 
-【核心纪律与质量标准】（必须严格遵守）：
-1. 强制搜索词加日期：调用搜索时，关键词必须包含“{today_str}”或“{yesterday_str}”。
-2. 强制时间戳过滤：必须核对【首次发生/发布时间】！只提取过去 24-48 小时内的【全新事件】。
-3. 彻底屏蔽“长尾旧闻”：绝对不允许炒冷饭（如已发布多日的GDP、降准等大宏观事件）。宁可找今天的突发小事件，也不拿旧闻凑数。
-4. 对标顶级早报充实【市场脉搏简报】：对标“36氪的8点1氪”或“华尔街见闻”风格，深度挖掘过去24小时内极具商业与投资价值的资讯。请强制输出 6 到 8 条简报！内容必须涵盖：科技巨头动作、前沿产业（AI、新能源、低空经济等）异动、重大投融资/并购、重磅行业政策。每条用一句话干净利落地说清主体和事件影响。
-5. 严格按预设 JSON 格式返回。
+【采编硬性指标】：
+1. 📌【今日核心要闻】：数量必须控制在 3 到 5 条。
+   - 如果单一事件占据多条，请合并为一条。
+   - 必须横向搜寻：国内经济政策、美联储/欧央行动态、全球核心科技（AI/芯片）异动、大宗商品重大拐点等不同领域。
+2. 📰【市场脉搏简报】：对标“8点1氪”或“华尔街见闻”，强制输出 6 到 8 条极简商业资讯。内容涵盖科技巨头动作、前沿产业异动、重大投融资、重磅行业政策。
+3. 🛑【防旧闻过滤】：绝对禁止重复提及几天前已发生的旧闻（如准备金率下调、2025年GDP总结等）。只准报道过去 24-48 小时内的【新鲜进展】。
+4. 严格按预设 JSON 格式返回。
 """
 
 # ==========================================
 # 3. 抓取逻辑 (Coze 特工)
 # ==========================================
 def fetch_news_from_coze():
-    print(f"🕵️‍♂️ 正在潜入全网搜集 {today_str} 的客观行情情报...")
+    print(f"🕵️‍♂️ 正在为 {today_str} 的报纸采编素材...")
     headers = {
         'Authorization': f'Bearer {coze_token}',
         'Content-Type': 'application/json'
@@ -193,44 +194,7 @@ def format_text_for_email(data):
     return msg_content
 
 # ==========================================
-# 6. 生成供 PushPlus 监控的排版
-# ==========================================
-def format_text_for_monitor(data, email_status):
-    msg_content = f"## ⏱️ [监控] {today_str} 早报生成完毕\n\n"
-    msg_content += f"**发信状态**：{email_status}\n\n---\n\n"
-    
-    msg_content += "### 📌 【今日核心要闻】\n"
-    for idx, item in enumerate(data.get('top_news', []), 1):
-        msg_content += f"**{idx}. {item.get('title', '无标题')}**\n"
-        msg_content += f"> {item.get('summary', '无摘要')}\n\n"
-    
-    msg_content += "### 👁️ 【市场情绪与焦点观察】\n"
-    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n\n---\n"
-
-    indices = data.get('market_indices', {})
-    msg_content += "### 🌐 【主要市场行情综述】\n"
-    msg_content += f"- **🇨🇳 沪深 A 股**: {indices.get('A_shares', '暂无数据')}\n"
-    msg_content += f"- **🇭🇰 港股市场**: {indices.get('HK_shares', '暂无数据')}\n"
-    msg_content += f"- **🇺🇸 美股市场**: {indices.get('US_shares', '暂无数据')}\n\n---\n"
-
-    commodities = data.get('commodities', {})
-    msg_content += "### 🛢️ 【大宗商品期货综述】\n"
-    msg_content += f"- **🥇 黄金**: {commodities.get('gold', '暂无数据')}\n"
-    msg_content += f"- **🥈 白银**: {commodities.get('silver', '暂无数据')}\n"
-    msg_content += f"- **🛢️ 原油**: {commodities.get('crude_oil', '暂无数据')}\n\n---\n"
-    
-    msg_content += "### 📰 【市场脉搏简报】\n"
-    briefings = data.get('briefings', [])
-    if briefings:
-        for b in briefings:
-            msg_content += f"- **[{b.get('category', '简报')}]** {b.get('content', '无内容')}\n\n"
-    else:
-        msg_content += "- 暂无异动或重大投资简报\n\n"
-
-    return msg_content
-
-# ==========================================
-# 7. 合成语音 MP3
+# 6. 合成语音 MP3
 # ==========================================
 async def generate_audio(audio_script):
     print("🎙️ 正在召唤 AI 播音员 (晓晓) 录制新闻音频...")
@@ -246,19 +210,19 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 8. 发送邮件并返回状态
+# 7. 发送邮件并返回状态 (一键三发)
 # ==========================================
 def send_email_with_attachment(email_body, attachment_path):
     print("📧 正在打包邮件并发送...")
     if not all([smtp_server, sender_email, sender_password, receiver_email]):
-        error_msg = "❌ 邮件配置不全！"
-        print(error_msg)
-        return error_msg
+        print("❌ 邮件配置不全！")
+        return
 
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
-    msg['Cc'] = cc_email  
+    # 将女朋友的邮箱和你的监控邮箱都加入抄送栏
+    msg['Cc'] = f"{cc_email}, {monitor_email}"  
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
     msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
 
@@ -274,38 +238,15 @@ def send_email_with_attachment(email_body, attachment_path):
     try:
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
-        to_addrs = [receiver_email, cc_email]
-        server.sendmail(sender_email, to_addrs, msg.as_string())
-        server.quit()
-        success_msg = f"✅ 邮件已成功包含 MP3 附件发送至 {receiver_email} 并抄送 {cc_email}"
-        print(success_msg)
-        return success_msg
-    except Exception as e:
-        error_msg = f"❌ 邮件发送失败: {e}"
-        print(error_msg)
-        return error_msg
-
-# ==========================================
-# 9. 发送 PushPlus 监控通知
-# ==========================================
-def send_pushplus_monitor(content):
-    if not pushplus_token:
-        print("⏭️ 未配置 PushPlus Token，跳过监控推送。")
-        return
         
-    print("📲 正在发送监控数据到微信...")
-    url = 'http://www.pushplus.plus/send'
-    push_data = {
-        "token": pushplus_token,
-        "title": f"⏱️ [监控] {today_str} 早报生成状态",
-        "content": content,
-        "template": "markdown"
-    }
-    try:
-        requests.post(url, json=push_data)
-        print("✅ 监控推文已送达微信！")
+        # 将三个目标邮箱合并为一个发送列表
+        to_addrs = [receiver_email, cc_email, monitor_email]
+        server.sendmail(sender_email, to_addrs, msg.as_string())
+        
+        server.quit()
+        print(f"✅ 邮件已成功包含 MP3 附件发送至父亲，并抄送至女朋友和你自己的邮箱！")
     except Exception as e:
-        print(f"❌ 监控推送异常: {e}")
+        print(f"❌ 邮件发送失败: {e}")
 
 # ==========================================
 # 🚀 主运行控制台
@@ -313,17 +254,16 @@ def send_pushplus_monitor(content):
 async def main():
     report_data = fetch_news_from_coze()
     if not report_data:
-        send_pushplus_monitor("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
+        print("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
+    # 1. 音频合成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
+    # 2. 发送邮件 (目标收件人 + 两个抄送)
     email_text = format_text_for_email(report_data)
-    email_status = send_email_with_attachment(email_text, audio_file_path)
-
-    monitor_content = format_text_for_monitor(report_data, email_status)
-    send_pushplus_monitor(monitor_content)
+    send_email_with_attachment(email_text, audio_file_path)
 
 if __name__ == '__main__':
     asyncio.run(main())
