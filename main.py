@@ -26,26 +26,26 @@ cc_email = "15757699818@163.com"
 monitor_email = "779825335@qq.com"  
 
 # ==========================================
-# 2. 动态生成时间，锁定极其严格的时间窗
+# 2. 动态生成时间
 # ==========================================
 tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
-# 【投研主编级采编指令：植入预期差与板块推演】
+# 【投研主编级指令：加入极限字数压缩】
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请执行每日全球宏观与产业资讯深度抓取。
 
-【投研级采编硬性指标】（必须严格遵守）：
+【投研级采编与极简字数指令】（必须严格遵守）：
 1. 📌【今日核心要闻】（3-5条）：
-   - 核心要求：不要只报新闻通稿！必须带有“买方研究员”视角。
-   - 数据强制对比：遇到宏观数据或财报发布，必须明确列出“市场预期值 vs 实际公布值”，重点突出“预期差”。
-   - 资产与板块推演：在每条摘要（summary）的最后，必须单起一行，加上“🎯 核心逻辑与关注板块：”前缀，用一句话明确指出该事件利好/利空哪类宏观资产（如美元、美债、黄金），或建议重点关注A股/美股的什么具体产业链板块。
+   - 字数极限压缩：每条要闻的摘要部分（含数据对比和逻辑推演）必须严格控制在 60-80 字以内！一针见血，绝不废话！
+   - 数据强制对比：遇到宏观数据或财报，只写“预期X，实际Y”。
+   - 资产推演：在摘要末尾加上“🎯 逻辑：”，用一句话点透利好/利空哪个具体板块。
 2. 📰【市场脉搏简报】（6-8条）：
-   - 对标“华尔街见闻”的快讯精批。内容涵盖科技巨头动作、前沿产业异动、重大投融资、重磅行业政策。
-   - 在每条简报内容（content）的末尾，必须附带简短的“💡 异动短评：”，点透背后的资金博弈、产业链影响或交易逻辑。
-3. 🛑【防旧闻过滤】：绝对禁止报道 24-48 小时之前已充分消化的旧闻。只抓取最新发酵的事件。
+   - 字数极限压缩：每条简报总计不超过 50 字。
+   - 末尾加上“💡 短评：”，点透资金博弈或产业链影响。
+3. 🛑【防旧闻过滤】：只抓取最新发酵的事件，绝对不报旧闻。
 4. 严格按预设 JSON 格式返回。
 """
 
@@ -54,147 +54,157 @@ SEARCH_PROMPT = f"""
 # ==========================================
 def fetch_news_from_coze():
     print(f"🕵️‍♂️ 正在为 {today_str} 的报纸采编素材...")
-    headers = {
-        'Authorization': f'Bearer {coze_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    chat_url = 'https://api.coze.cn/v3/chat'
+    headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
     payload = {
-        "bot_id": coze_bot_id,
-        "user_id": "quant_master", 
-        "stream": False,
+        "bot_id": coze_bot_id, "user_id": "quant_master", "stream": False,
         "additional_messages": [{"role": "user", "content": SEARCH_PROMPT, "content_type": "text"}]
     }
 
     try:
-        res = requests.post(chat_url, headers=headers, json=payload).json()
-        if res.get('code') != 0:
-            print(f"❌ 发起任务失败: {res}")
-            return None
-            
-        chat_id = res['data']['id']
-        conversation_id = res['data']['conversation_id']
-        print("✅ 任务已下达，特工正在深度检索全网数据 (约需十几秒)...")
+        res = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload).json()
+        if res.get('code') != 0: return None
+        chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
         
-        retrieve_url = f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}'
         while True:
-            ret = requests.get(retrieve_url, headers=headers).json()
-            status = ret.get('data', {}).get('status')
-            
-            if status == 'completed':
-                break
-            elif status in ['failed', 'canceled', 'requires_action']:
-                print(f"❌ 抓取任务异常中断，状态: {status}")
-                return None
+            ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+            if ret.get('data', {}).get('status') == 'completed': break
             time.sleep(2)
             
-        msg_url = f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}'
-        msgs_res = requests.get(msg_url, headers=headers).json()
+        msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+        content = next((msg.get('content') for msg in msgs.get('data', []) if msg.get('type') == 'answer'), "")
         
-        content = ""
-        for msg in msgs_res.get('data', []):
-            if msg.get('type') == 'answer':
-                content = msg.get('content')
-                break
-        
-        print("📥 收到情报，正在解码 JSON...")
         json_match = re.search(r'\{.*\}', content, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        else:
-            print("❌ 解码失败，返回原文：\n", content)
-            return None
-            
+        return json.loads(json_match.group()) if json_match else None
     except Exception as e:
-        print(f"❌ 抓取异常: {e}")
-        return None
+        print(f"❌ 抓取异常: {e}"); return None
 
 # ==========================================
 # 4. 生成专供语音朗读的清洗版台本
 # ==========================================
 def clean_for_speech(text):
-    if not text:
-        return "无内容"
+    if not text: return "无内容"
     text = re.sub(r'http[s]?://\S+', '', text)
-    text = re.sub(r'来源链接[:：]?\s*', '', text)
-    text = re.sub(r'数据来源[:：]?\s*', '', text)
     text = re.sub(r'\[.*?\]\(.*?\)', '', text)
     return text.strip()
 
 def format_text_for_audio(data):
     script = f"早上好！今天是{today_str}。欢迎收听今日全球宏观与市场详报。\n\n"
-    
     script += "首先为您播报今日核心要闻。\n"
     for idx, item in enumerate(data.get('top_news', []), 1):
-        clean_title = clean_for_speech(item.get('title', '无标题'))
-        clean_summary = clean_for_speech(item.get('summary', '无摘要'))
-        script += f"第{idx}条，{clean_title}。{clean_summary}\n\n"
+        script += f"第{idx}条，{clean_for_speech(item.get('title'))}。{clean_for_speech(item.get('summary'))}\n\n"
     
-    script += "接下来是市场情绪与焦点观察。\n"
-    script += f"{clean_for_speech(data.get('market_focus', '暂无观察数据'))}\n\n"
-
-    script += "主要市场行情综述方面。\n"
+    script += "接下来是主要行情与焦点观察。\n"
+    script += f"{clean_for_speech(data.get('market_focus'))}\n\n"
+    
     indices = data.get('market_indices', {})
-    script += f"沪深A股：{clean_for_speech(indices.get('A_shares', '暂无数据'))}\n"
-    script += f"港股市场：{clean_for_speech(indices.get('HK_shares', '暂无数据'))}\n"
-    script += f"美股市场：{clean_for_speech(indices.get('US_shares', '暂无数据'))}\n\n"
-
-    script += "大宗商品期货方面。\n"
-    commodities = data.get('commodities', {})
-    script += f"黄金：{clean_for_speech(commodities.get('gold', '暂无数据'))}\n"
-    script += f"白银：{clean_for_speech(commodities.get('silver', '暂无数据'))}\n"
-    script += f"原油：{clean_for_speech(commodities.get('crude_oil', '暂无数据'))}\n\n"
+    script += f"A股：{clean_for_speech(indices.get('A_shares'))}。美股：{clean_for_speech(indices.get('US_shares'))}。\n\n"
     
     script += "最后为您带来市场脉搏简报。\n"
-    briefings = data.get('briefings', [])
-    if briefings:
-        for b in briefings:
-            cat = clean_for_speech(b.get('category', '简报'))
-            con = clean_for_speech(b.get('content', '无内容'))
-            script += f"{cat}：{con}\n"
+    for b in data.get('briefings', []):
+        script += f"{clean_for_speech(b.get('category'))}：{clean_for_speech(b.get('content'))}\n"
     
-    script += "\n以上就是今天的全部内容，感谢您的收听，祝您生活愉快。"
+    script += "\n以上就是今天的全部内容，祝您交易顺利。"
     return script
 
 # ==========================================
-# 5. 生成供邮件阅读的图文排版
+# 5. 生成极其炫酷的 HTML 邮件排版
 # ==========================================
-def format_text_for_email(data):
-    msg_content = f"【{today_str} - 您的专属宏观与市场早报】\n\n"
-    msg_content += "🎧 语音播报已作为附件发送，请点击下方附件收听。\n\n"
-    msg_content += "-" * 30 + "\n\n"
-    
-    msg_content += "📌 【今日核心要闻】\n"
+def format_html_for_email(data):
+    # 基础 CSS 与头部
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 20px; font-family: 'Helvetica Neue', Helvetica, Arial, 'Microsoft Yahei', sans-serif; background-color: #f4f6f9;">
+        <div style="max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            
+            <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #ffffff; padding: 25px 20px; text-align: center;">
+                <h2 style="margin: 0; font-size: 24px; letter-spacing: 1px;">🎙️ 全球宏观与市场晨报</h2>
+                <p style="margin: 8px 0 0 0; font-size: 14px; color: #d1e0ff;">{today_str} · 机构级投研视野</p>
+            </div>
+
+            <div style="background-color: #fff8e1; border-left: 4px solid #ffc107; padding: 12px 20px; margin: 20px 20px 0 20px; border-radius: 4px; font-size: 14px; color: #5d4000;">
+                <b>🎧 温馨提示：</b> 本期晨报语音版已作为 <b>邮件附件 (.mp3)</b> 发送，请点击底部附件直接收听。
+            </div>
+
+            <div style="padding: 20px;">
+    """
+
+    # --- 核心要闻区 ---
+    html += """
+                <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 10px;">📌 今日核心要闻</h3>
+    """
     for idx, item in enumerate(data.get('top_news', []), 1):
-        msg_content += f"{idx}. {item.get('title', '无标题')}\n"
-        msg_content += f"   摘要：{item.get('summary', '无摘要')}\n"
-        msg_content += f"   来源：{item.get('url', '无链接')}\n\n"
-    
-    msg_content += "👁️ 【市场情绪与焦点观察】\n"
-    msg_content += f"{data.get('market_focus', '暂无观察数据')}\n\n"
+        # 尝试把“🎯 逻辑”或者预期差分离出来，加粗变色显示
+        summary = item.get('summary', '无摘要')
+        summary_html = summary.replace('🎯 逻辑：', '<br><span style="color: #e53935; font-weight: bold; font-size: 13px;">🎯 逻辑：</span><span style="color: #d32f2f; font-size: 13px;">') + ('</span>' if '🎯 逻辑：' in summary else '')
+        
+        html += f"""
+                <div style="margin-bottom: 18px; padding: 15px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #2a5298;">
+                    <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px;">{idx}. {item.get('title', '无标题')}</h4>
+                    <p style="margin: 0; font-size: 14.5px; line-height: 1.6; color: #334155;">{summary_html}</p>
+                </div>
+        """
 
+    # --- 行情与情绪区 ---
     indices = data.get('market_indices', {})
-    msg_content += "🌐 【主要市场行情综述】\n"
-    msg_content += f"🇨🇳 沪深 A 股: {indices.get('A_shares', '暂无数据')}\n"
-    msg_content += f"🇭🇰 港股市场: {indices.get('HK_shares', '暂无数据')}\n"
-    msg_content += f"🇺🇸 美股市场: {indices.get('US_shares', '暂无数据')}\n\n"
-
     commodities = data.get('commodities', {})
-    msg_content += "🛢️ 【大宗商品期货综述】\n"
-    msg_content += f"🥇 黄金: {commodities.get('gold', '暂无数据')}\n"
-    msg_content += f"🥈 白银: {commodities.get('silver', '暂无数据')}\n"
-    msg_content += f"🛢️ 原油: {commodities.get('crude_oil', '暂无数据')}\n\n"
     
-    msg_content += "📰 【市场脉搏简报】\n"
+    html += f"""
+                <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 30px;">🌐 市场情绪与关键行情</h3>
+                
+                <p style="font-size: 14.5px; line-height: 1.6; color: #334155; margin-bottom: 15px;">
+                    <b>👁️ 焦点观察：</b>{data.get('market_focus', '暂无观察数据')}
+                </p>
+
+                <table width="100%" style="border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+                    <tr>
+                        <td width="50%" style="padding: 10px; background: #f1f5f9; border-radius: 6px 0 0 6px;"><b>🇨🇳 A股：</b><br><span style="color: #475569;">{indices.get('A_shares', '暂无数据')}</span></td>
+                        <td width="50%" style="padding: 10px; background: #e2e8f0; border-radius: 0 6px 6px 0;"><b>🇺🇸 美股：</b><br><span style="color: #475569;">{indices.get('US_shares', '暂无数据')}</span></td>
+                    </tr>
+                    <tr><td colspan="2" style="height: 10px;"></td></tr>
+                    <tr>
+                        <td width="50%" style="padding: 10px; background: #fffbeb; border-radius: 6px 0 0 6px;"><b>🥇 黄金：</b><br><span style="color: #475569;">{commodities.get('gold', '暂无数据')}</span></td>
+                        <td width="50%" style="padding: 10px; background: #fef3c7; border-radius: 0 6px 6px 0;"><b>🛢️ 原油：</b><br><span style="color: #475569;">{commodities.get('crude_oil', '暂无数据')}</span></td>
+                    </tr>
+                </table>
+    """
+
+    # --- 市场脉搏简报 ---
+    html += """
+                <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 30px;">📰 市场脉搏简报</h3>
+                <ul style="padding-left: 20px; margin: 0; color: #334155; font-size: 14.5px; line-height: 1.7;">
+    """
     briefings = data.get('briefings', [])
     if briefings:
         for b in briefings:
-            msg_content += f"[{b.get('category', '简报')}] {b.get('content', '无内容')}\n"
+            content = b.get('content', '无内容')
+            # 强化短评视觉效果
+            content_html = content.replace('💡 短评：', '<br><span style="color: #ea580c; font-weight: bold; font-size: 13px;">💡 短评：</span><span style="color: #c2410c; font-size: 13px;">') + ('</span>' if '💡 短评：' in content else '')
+            
+            html += f"""
+                    <li style="margin-bottom: 12px;">
+                        <b>[{b.get('category', '简报')}]</b> {content_html}
+                    </li>
+            """
     else:
-        msg_content += "暂无异动或重大投资简报\n"
+        html += "<li>暂无异动或重大投资简报</li>"
 
-    return msg_content
+    html += """
+                </ul>
+            </div>
+            
+            <div style="background-color: #f8fafc; text-align: center; padding: 15px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0;">
+                本早报由 AI 自动化采编生成，所有数据与推演仅供复盘参考，不构成实质性投资建议。
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
 
 # ==========================================
 # 6. 合成语音 MP3
@@ -213,10 +223,10 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 7. 发送邮件并返回状态
+# 7. 发送包含 HTML 的邮件并返回状态
 # ==========================================
-def send_email_with_attachment(email_body, attachment_path):
-    print("📧 正在打包邮件并发送...")
+def send_email_with_attachment(html_body, attachment_path):
+    print("📧 正在打包 HTML 邮件并发送...")
     if not all([smtp_server, sender_email, sender_password, receiver_email]):
         print("❌ 邮件配置不全！")
         return
@@ -226,7 +236,9 @@ def send_email_with_attachment(email_body, attachment_path):
     msg['To'] = receiver_email
     msg['Cc'] = f"{cc_email}, {monitor_email}"  
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
-    msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
+    
+    # 【核心改动】：这里把 'plain' 改成了 'html'
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     if attachment_path and os.path.exists(attachment_path):
         try:
@@ -243,7 +255,7 @@ def send_email_with_attachment(email_body, attachment_path):
         to_addrs = [receiver_email, cc_email, monitor_email]
         server.sendmail(sender_email, to_addrs, msg.as_string())
         server.quit()
-        print(f"✅ 邮件已成功包含 MP3 附件发送！")
+        print(f"✅ HTML 邮件已成功包含 MP3 附件发送至父亲，并抄送至女朋友和你自己的邮箱！")
     except Exception as e:
         print(f"❌ 邮件发送失败: {e}")
 
@@ -256,11 +268,13 @@ async def main():
         print("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
+    # 音频台本依然使用纯文本生成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
     
-    email_text = format_text_for_email(report_data)
-    send_email_with_attachment(email_text, audio_file_path)
+    # 邮件排版改为极其炫酷的 HTML 格式
+    email_html = format_html_for_email(report_data)
+    send_email_with_attachment(email_html, audio_file_path)
 
 if __name__ == '__main__':
     asyncio.run(main())
