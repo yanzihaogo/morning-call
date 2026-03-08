@@ -3,16 +3,13 @@ import requests
 import json
 import re
 import time
-import asyncio
-import edge_tts
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 配置中心 (直发你和女朋友的邮箱)
+# 1. 配置中心 (只发你和女朋友，去除语音模块)
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
@@ -28,24 +25,24 @@ cc_email = "15757699818@163.com"
 tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
-yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 【行业与个股专属投研指令】
+# 2. 【行业与个股专属投研指令 - 周末防空仓版】
 # ==========================================
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请你作为资深A股军工与智能电网行业研究员，执行定向投研任务。
 
 【定向采编与投研指令】（必须严格遵守）：
-1. 🏭【行业精要】（2-4条）：重点搜索过去24-48小时内，A股“国防军工/航空航天”与“智能电网/特高压/电力设备”的重大产业政策、行业订单、突发事件。
-2. ⚖️【板块仓位建议】：基于上述基本面与大盘资金情绪，分别对“军工板块”和“电网板块”给出明确的初步投资建议（强制输出：加仓、减仓、或 观望），并附带简短的15字核心逻辑。
-3. 🎯【核心个股深度追踪】（极度重要）：必须单独搜索以下4只股票的最新公告、主力资金动向或相关题材催化：
+1. 🏭【行业精要】（2-4条）：搜索“国防军工/航空航天”与“智能电网/特高压/电力设备”的重大产业政策或订单。
+   - 弹性时间：如果是周末导致过去24小时无新闻，请强制复盘上周五的板块异动或最近72小时的重大研报，绝对不能空缺！
+2. ⚖️【板块仓位建议】：基于上述基本面，分别对“军工板块”和“电网板块”给出明确初步投资建议（强制输出：加仓、减仓、或 观望），并附带简短的15字核心逻辑。
+3. 🎯【核心个股深度追踪】（绝对硬性要求）：必须且只能单独搜索以下4只股票：
    - 航发科技 (600391)
    - 航天动力 (600343)
    - 航发控制 (000738)
    - 奥瑞德 (600666)
-   针对每一只股票，给出最新动态简述，并基于量价或基本面给出明确的【操作建议】（加仓/减仓/持有/观望）及一句话理由。
-4. 严格按照预设的JSON格式返回数据，确保个股名称完全匹配。
+   - 防空仓指令：针对这4只票，即使周末无最新公告，也必须复述其最近一个交易日的收盘表现、资金流向或技术形态，绝不允许遗漏任何一只股票！给出明确的【操作建议】（加仓/减仓/持有/观望）及一句话理由。
+4. 严格按照预设的JSON格式返回数据，不要有任何多余的废话。
 """
 
 # ==========================================
@@ -61,7 +58,9 @@ def fetch_news_from_coze():
 
     try:
         res = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload).json()
-        if res.get('code') != 0: return None
+        if res.get('code') != 0: 
+            print("❌ 任务发起失败")
+            return None
         chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
         
         while True:
@@ -78,35 +77,7 @@ def fetch_news_from_coze():
         print(f"❌ 抓取异常: {e}"); return None
 
 # ==========================================
-# 4. 生成语音台本
-# ==========================================
-def clean_for_speech(text):
-    if not text: return "无内容"
-    return re.sub(r'http[s]?://\S+|\[.*?\]\(.*?\)', '', text).strip()
-
-def format_text_for_audio(data):
-    script = f"您好，今天是{today_str}。欢迎收听军工与电网行业专属定向研报。\n\n"
-    
-    script += "首先是行业精要与板块建议。\n"
-    for item in data.get('sector_news', data.get('top_news', [])):
-        script += f"{clean_for_speech(item.get('title'))}。{clean_for_speech(item.get('summary'))}\n"
-    
-    script += f"\n综合板块建议：\n{clean_for_speech(data.get('sector_advice', data.get('market_focus', '暂无板块综合建议')))}\n\n"
-    
-    script += "接下来是您特别关注的核心个股异动追踪。\n"
-    # 兼容两种可能的 JSON 结构
-    focus_stocks = data.get('focus_stocks', data.get('briefings', []))
-    for stock in focus_stocks:
-        name = clean_for_speech(stock.get('name', stock.get('category', '未知股票')))
-        news = clean_for_speech(stock.get('news', stock.get('content', '暂无动态')))
-        advice = clean_for_speech(stock.get('advice', '暂无建议'))
-        script += f"{name}：{news}。操作建议：{advice}。\n\n"
-        
-    script += "本研报操作建议仅供参考，请结合盘面实际情况决策。祝您投资顺利。"
-    return script
-
-# ==========================================
-# 5. 生成工业风 HTML 排版
+# 4. 生成工业风 HTML 排版 (已移除语音提示框)
 # ==========================================
 def format_html_for_email(data):
     html = f"""
@@ -121,25 +92,25 @@ def format_html_for_email(data):
                 <p style="margin: 5px 0 0 0; font-size: 13px; color: #94a3b8;">{today_str} · 专属个股追踪</p>
             </div>
 
-            <div style="background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 12px 20px; margin: 20px 20px 0 20px; font-size: 14px; color: #166534;">
-                <b>🎧 研报语音版：</b> 请点击邮件底部的 <b>.mp3 附件</b> 直接收听。
-            </div>
-
             <div style="padding: 20px;">
     """
 
     # --- 行业精要 ---
     html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 5px;">🏭 行业精要与板块推演</h3>"""
-    for item in data.get('sector_news', data.get('top_news', [])):
-        title = item.get('title', '无标题')
-        summary = item.get('summary', '无摘要')
-        summary = summary.replace('🎯 逻辑：', '<br><span style="color: #2563eb; font-weight: bold;">🎯 逻辑：</span>')
-        html += f"""
-                <div style="margin-bottom: 15px;">
-                    <h4 style="margin: 0 0 5px 0; color: #334155; font-size: 15.5px;">▪ {title}</h4>
-                    <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.6;">{summary}</p>
-                </div>
-        """
+    sector_items = data.get('sector_news', data.get('top_news', []))
+    if not sector_items:
+        html += "<p style='color: #64748b; font-size: 14px;'>暂无重大行业资讯。</p>"
+    else:
+        for item in sector_items:
+            title = item.get('title', '无标题')
+            summary = item.get('summary', '无摘要')
+            summary = summary.replace('🎯 逻辑：', '<br><span style="color: #2563eb; font-weight: bold;">🎯 逻辑：</span>')
+            html += f"""
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 5px 0; color: #334155; font-size: 15.5px;">▪ {title}</h4>
+                        <p style="margin: 0; font-size: 14px; color: #475569; line-height: 1.6;">{summary}</p>
+                    </div>
+            """
 
     # --- 板块操作建议 ---
     html += f"""
@@ -154,27 +125,30 @@ def format_html_for_email(data):
     # --- 重点个股追踪 ---
     html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 35px;">🎯 专属个股深度追踪</h3>"""
     focus_stocks = data.get('focus_stocks', data.get('briefings', []))
-    for stock in focus_stocks:
-        name = stock.get('name', stock.get('category', '未知'))
-        news = stock.get('news', stock.get('content', '无最新动态'))
-        advice = stock.get('advice', '暂无')
-        reason = stock.get('reason', '')
-        
-        # 动态颜色标识加减仓
-        advice_color = "#ea580c" # 默认橙色 (观望)
-        if "加" in advice or "多" in advice: advice_color = "#dc2626" # 红色
-        elif "减" in advice or "空" in advice: advice_color = "#16a34a" # 绿色
-        
-        html += f"""
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; position: relative;">
-                    <div style="position: absolute; top: 15px; right: 15px; background: {advice_color}; color: white; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;">
-                        建议：{advice}
+    if not focus_stocks:
+         html += "<p style='color: #64748b; font-size: 14px;'>暂无个股数据，可能遇到接口延迟。</p>"
+    else:
+        for stock in focus_stocks:
+            name = stock.get('name', stock.get('category', '未知'))
+            news = stock.get('news', stock.get('content', '无最新动态'))
+            advice = stock.get('advice', '暂无')
+            reason = stock.get('reason', '')
+            
+            # 动态颜色标识加减仓
+            advice_color = "#ea580c" # 默认橙色 (观望)
+            if "加" in advice or "多" in advice: advice_color = "#dc2626" # 红色
+            elif "减" in advice or "空" in advice: advice_color = "#16a34a" # 绿色
+            
+            html += f"""
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; position: relative;">
+                        <div style="position: absolute; top: 15px; right: 15px; background: {advice_color}; color: white; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                            建议：{advice}
+                        </div>
+                        <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px;">🏢 {name}</h4>
+                        <p style="margin: 0 0 8px 0; font-size: 14px; color: #475569; line-height: 1.6;"><b>近期动态：</b>{news}</p>
+                        <p style="margin: 0; font-size: 13px; color: {advice_color}; font-weight: bold;">💡 操盘理由：{reason}</p>
                     </div>
-                    <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px;">🏢 {name}</h4>
-                    <p style="margin: 0 0 8px 0; font-size: 14px; color: #475569; line-height: 1.6;"><b>最新动态：</b>{news}</p>
-                    <p style="margin: 0; font-size: 13px; color: {advice_color}; font-weight: bold;">💡 操盘理由：{reason}</p>
-                </div>
-        """
+            """
 
     html += """
             </div>
@@ -188,41 +162,37 @@ def format_html_for_email(data):
     return html
 
 # ==========================================
-# 6. 语音与发送流程
+# 5. 直接发送纯 HTML 邮件
 # ==========================================
-async def generate_audio(audio_script):
-    print("🎙️ 正在录制行业专属音频...")
-    try:
-        await edge_tts.Communicate(audio_script, "zh-CN-YunxiNeural", rate="+5%").save("sector_news.mp3")
-        return "sector_news.mp3"
-    except Exception as e:
-        print(f"❌ 音频失败: {e}"); return None
-
-def send_email_with_attachment(html_body, attachment_path):
-    print("📧 正在发送定向研报邮件...")
+def send_email(html_body):
+    print("📧 正在发送无附件版定向研报邮件...")
     msg = MIMEMultipart()
-    msg['From'], msg['To'], msg['Cc'] = sender_email, receiver_email, cc_email
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Cc'] = cc_email
     msg['Subject'] = f"⚡ {today_str} 军工与电网定向研报及个股追踪"
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-    if attachment_path:
-        with open(attachment_path, "rb") as f:
-            part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
-        part['Content-Disposition'] = f'attachment; filename="Sector_Report_{today_str}.mp3"'
-        msg.attach(part)
     try:
         server = smtplib.SMTP_SSL(smtp_server, 465)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, [receiver_email, cc_email], msg.as_string())
         server.quit()
         print(f"✅ 定向研报发送成功！")
-    except Exception as e: print(f"❌ 邮件发送失败: {e}")
+    except Exception as e: 
+        print(f"❌ 邮件发送失败: {e}")
 
-async def main():
+# ==========================================
+# 🚀 主控制流程
+# ==========================================
+def main():
     data = fetch_news_from_coze()
-    if not data: return
-    audio_path = await generate_audio(format_text_for_audio(data))
-    send_email_with_attachment(format_html_for_email(data), audio_path)
+    if not data: 
+        print("❌ 获取数据为空，停止发送。")
+        return
+    html_content = format_html_for_email(data)
+    send_email(html_content)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # 去除异步，直接运行
+    main()
