@@ -9,7 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 配置中心 (只发你和女朋友，去除语音模块)
+# 1. 配置中心
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
@@ -18,7 +18,6 @@ smtp_server = os.getenv('SMTP_SERVER')
 sender_email = os.getenv('SENDER_EMAIL')     
 sender_password = os.getenv('SENDER_PASSWORD') 
 
-# 收件人直接设定为你，抄送女朋友
 receiver_email = "779825335@qq.com"   
 cc_email = "15757699818@163.com"     
 
@@ -27,26 +26,34 @@ now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 【行业与个股专属投研指令 - 周末防空仓版】
+# 2. 【暴力填鸭式 JSON 投研指令】
 # ==========================================
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请你作为资深A股军工与智能电网行业研究员，执行定向投研任务。
 
-【定向采编与投研指令】（必须严格遵守）：
-1. 🏭【行业精要】（2-4条）：搜索“国防军工/航空航天”与“智能电网/特高压/电力设备”的重大产业政策或订单。
-   - 弹性时间：如果是周末导致过去24小时无新闻，请强制复盘上周五的板块异动或最近72小时的重大研报，绝对不能空缺！
-2. ⚖️【板块仓位建议】：基于上述基本面，分别对“军工板块”和“电网板块”给出明确初步投资建议（强制输出：加仓、减仓、或 观望），并附带简短的15字核心逻辑。
-3. 🎯【核心个股深度追踪】（绝对硬性要求）：必须且只能单独搜索以下4只股票：
-   - 航发科技 (600391)
-   - 航天动力 (600343)
-   - 航发控制 (000738)
-   - 奥瑞德 (600666)
-   - 防空仓指令：针对这4只票，即使周末无最新公告，也必须复述其最近一个交易日的收盘表现、资金流向或技术形态，绝不允许遗漏任何一只股票！给出明确的【操作建议】（加仓/减仓/持有/观望）及一句话理由。
-4. 严格按照预设的JSON格式返回数据，不要有任何多余的废话。
+【绝对硬性指令 - 严禁交白卷】：
+1. 🏭【行业精要】（2-4条）：搜索“国防军工/航空航天”与“智能电网”的重大产业政策或订单。如果是周末，请复盘上周五资金异动。
+2. ⚖️【板块仓位建议】：给出军工和电网板块的初步投资建议（加仓/减仓/观望）。
+3. 🎯【四只金股深度追踪】（绝对硬性要求）：必须且只能分析以下4只股票：【航发科技、航天动力、航发控制、奥瑞德】。
+   - 就算周末毫无新闻，你也必须基于其近期基本面、技术形态或大盘趋势，给出你的分析和【操作建议】，决不允许遗漏任何一只股票！
+
+🚨【强制 JSON 输出格式】（不要输出任何额外的 markdown 符号，直接输出以下 JSON）：
+{{
+    "sector_news": [
+        {{"title": "行业新闻标题", "summary": "新闻摘要。🎯 逻辑：一句话利好逻辑"}}
+    ],
+    "sector_advice": "综合建议：加仓/减仓/观望。理由：...",
+    "focus_stocks": [
+        {{"name": "航发科技", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航天动力", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航发控制", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "奥瑞德", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}}
+    ]
+}}
 """
 
 # ==========================================
-# 3. 抓取逻辑
+# 3. 抓取逻辑 (增加 JSON 强校验)
 # ==========================================
 def fetch_news_from_coze():
     print(f"🕵️‍♂️ 正在执行【军工/电网】行业及个股定向侦察...")
@@ -66,18 +73,26 @@ def fetch_news_from_coze():
         while True:
             ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
             if ret.get('data', {}).get('status') == 'completed': break
+            elif ret.get('data', {}).get('status') in ['failed', 'canceled']: return None
             time.sleep(2)
             
         msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
         content = next((msg.get('content') for msg in msgs.get('data', []) if msg.get('type') == 'answer'), "")
         
+        # 提取并解析 JSON
         json_match = re.search(r'\{.*\}', content, re.DOTALL)
-        return json.loads(json_match.group()) if json_match else None
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except:
+                print("❌ JSON 解析失败，AI 返回格式依然错误")
+                return None
+        return None
     except Exception as e:
         print(f"❌ 抓取异常: {e}"); return None
 
 # ==========================================
-# 4. 生成工业风 HTML 排版 (已移除语音提示框)
+# 4. 生成工业风 HTML 排版
 # ==========================================
 def format_html_for_email(data):
     html = f"""
@@ -97,7 +112,7 @@ def format_html_for_email(data):
 
     # --- 行业精要 ---
     html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 5px;">🏭 行业精要与板块推演</h3>"""
-    sector_items = data.get('sector_news', data.get('top_news', []))
+    sector_items = data.get('sector_news', [])
     if not sector_items:
         html += "<p style='color: #64748b; font-size: 14px;'>暂无重大行业资讯。</p>"
     else:
@@ -117,27 +132,26 @@ def format_html_for_email(data):
                 <div style="background-color: #fff1f2; border: 1px solid #fda4af; padding: 15px; border-radius: 6px; margin-top: 20px;">
                     <h4 style="margin: 0 0 8px 0; color: #be123c; font-size: 15px;">⚖️ 行业整体仓位建议</h4>
                     <p style="margin: 0; font-size: 14px; color: #881337; line-height: 1.6;">
-                        {data.get('sector_advice', data.get('market_focus', '暂无建议'))}
+                        {data.get('sector_advice', '暂无建议')}
                     </p>
                 </div>
     """
 
     # --- 重点个股追踪 ---
     html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 35px;">🎯 专属个股深度追踪</h3>"""
-    focus_stocks = data.get('focus_stocks', data.get('briefings', []))
+    focus_stocks = data.get('focus_stocks', [])
     if not focus_stocks:
-         html += "<p style='color: #64748b; font-size: 14px;'>暂无个股数据，可能遇到接口延迟。</p>"
+         html += "<p style='color: #64748b; font-size: 14px;'>个股数据生成失败，请检查 AI 接口状态。</p>"
     else:
         for stock in focus_stocks:
-            name = stock.get('name', stock.get('category', '未知'))
-            news = stock.get('news', stock.get('content', '无最新动态'))
+            name = stock.get('name', '未知')
+            news = stock.get('news', '无最新动态')
             advice = stock.get('advice', '暂无')
             reason = stock.get('reason', '')
             
-            # 动态颜色标识加减仓
-            advice_color = "#ea580c" # 默认橙色 (观望)
-            if "加" in advice or "多" in advice: advice_color = "#dc2626" # 红色
-            elif "减" in advice or "空" in advice: advice_color = "#16a34a" # 绿色
+            advice_color = "#ea580c"
+            if "加" in advice or "多" in advice: advice_color = "#dc2626" 
+            elif "减" in advice or "空" in advice: advice_color = "#16a34a" 
             
             html += f"""
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; position: relative;">
@@ -162,10 +176,14 @@ def format_html_for_email(data):
     return html
 
 # ==========================================
-# 5. 直接发送纯 HTML 邮件
+# 5. 发送纯 HTML 邮件
 # ==========================================
 def send_email(html_body):
     print("📧 正在发送无附件版定向研报邮件...")
+    if not all([smtp_server, sender_email, sender_password, receiver_email]):
+        print("❌ 邮件配置不全！")
+        return
+
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
@@ -188,11 +206,10 @@ def send_email(html_body):
 def main():
     data = fetch_news_from_coze()
     if not data: 
-        print("❌ 获取数据为空，停止发送。")
+        print("❌ 获取数据为空或 JSON 格式异常，停止发送。")
         return
     html_content = format_html_for_email(data)
     send_email(html_content)
 
 if __name__ == '__main__':
-    # 去除异步，直接运行
     main()
