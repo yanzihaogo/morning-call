@@ -9,7 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 1. 配置中心
+# 1. 配置中心 
 # ==========================================
 coze_token = os.getenv('COZE_API_TOKEN')
 coze_bot_id = os.getenv('COZE_BOT_ID')
@@ -26,37 +26,41 @@ now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 【暴力填鸭式 JSON 投研指令】
+# 2. 【投研与浪漫双核指令】
 # ==========================================
 SEARCH_PROMPT = f"""
-今天是 {today_str}。请你作为资深A股军工与智能电网行业研究员，执行定向投研任务。
+今天是 {today_str}。请你作为资深A股军工与智能电网行业研究员，兼具文艺感，执行定向任务。
 
 【绝对硬性指令 - 严禁交白卷】：
-1. 🏭【行业精要】（2-4条）：搜索“国防军工/航空航天”与“智能电网”的重大产业政策或订单。如果是周末，请复盘上周五资金异动。
+1. 🏭【行业精要】（2-4条）：搜索“国防军工”与“智能电网”的重大产业政策或订单。如果是周末，请复盘上周五资金异动。
 2. ⚖️【板块仓位建议】：给出军工和电网板块的初步投资建议（加仓/减仓/观望）。
-3. 🎯【四只金股深度追踪】（绝对硬性要求）：必须且只能分析以下4只股票：【航发科技、航天动力、航发控制、奥瑞德】。
-   - 就算周末毫无新闻，你也必须基于其近期基本面、技术形态或大盘趋势，给出你的分析和【操作建议】，决不允许遗漏任何一只股票！
+3. 🎯【四只金股长短线双轨追踪】（绝对硬性要求）：必须且只能分析【航发科技、航天动力、航发控制、奥瑞德】。
+   - 【近期动态】：复盘其最新的基本面、公告或资金面。
+   - 【历史长线位置】（新增要求）：结合其过去1-3年的走势，简述其目前处于历史的什么阶段（如：超跌底部潜伏区、历史高位震荡、主升浪突破等），辅助判断长线安全边际。
+   - 【操作建议】：给出操作建议及具体理由。
+4. 💌【专属浪漫彩蛋】：在所有硬核分析结束后，请你原创一句文艺、深情、极具美感且每天绝对不重样的浪漫情话（约30-50字），作为今天的早安彩蛋。
 
-🚨【强制 JSON 输出格式】（不要输出任何额外的 markdown 符号，直接输出以下 JSON）：
+🚨【强制 JSON 输出格式】（不要输出任何额外的 markdown 符号，严格按以下 JSON 输出）：
 {{
     "sector_news": [
         {{"title": "行业新闻标题", "summary": "新闻摘要。🎯 逻辑：一句话利好逻辑"}}
     ],
     "sector_advice": "综合建议：加仓/减仓/观望。理由：...",
     "focus_stocks": [
-        {{"name": "航发科技", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "航天动力", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "航发控制", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "奥瑞德", "news": "近期动态或基本面复盘", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}}
-    ]
+        {{"name": "航发科技", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航天动力", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航发控制", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "奥瑞德", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}}
+    ],
+    "romantic_quote": "原创的不重样文艺情话"
 }}
 """
 
 # ==========================================
-# 3. 抓取逻辑 (增加 JSON 强校验)
+# 3. 抓取逻辑
 # ==========================================
 def fetch_news_from_coze():
-    print(f"🕵️‍♂️ 正在执行【军工/电网】行业及个股定向侦察...")
+    print(f"🕵️‍♂️ 正在执行【军工/电网】行业投研及情话生成...")
     headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
     payload = {
         "bot_id": coze_bot_id, "user_id": "quant_master", "stream": False,
@@ -79,20 +83,19 @@ def fetch_news_from_coze():
         msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
         content = next((msg.get('content') for msg in msgs.get('data', []) if msg.get('type') == 'answer'), "")
         
-        # 提取并解析 JSON
         json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except:
-                print("❌ JSON 解析失败，AI 返回格式依然错误")
+                print("❌ JSON 解析失败")
                 return None
         return None
     except Exception as e:
         print(f"❌ 抓取异常: {e}"); return None
 
 # ==========================================
-# 4. 生成工业风 HTML 排版
+# 4. 生成工业风与浪漫结合的 HTML 排版
 # ==========================================
 def format_html_for_email(data):
     html = f"""
@@ -100,11 +103,11 @@ def format_html_for_email(data):
     <html>
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="margin: 0; padding: 20px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #eef2f6;">
-        <div style="max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+        <div style="max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 8px 16px rgba(0,0,0,0.06);">
             
-            <div style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); color: #ffffff; padding: 20px; border-bottom: 4px solid #3b82f6;">
-                <h2 style="margin: 0; font-size: 22px;">⚡ 电网 × 军工 | 定向行业研报</h2>
-                <p style="margin: 5px 0 0 0; font-size: 13px; color: #94a3b8;">{today_str} · 专属个股追踪</p>
+            <div style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); color: #ffffff; padding: 25px 20px; border-bottom: 4px solid #3b82f6;">
+                <h2 style="margin: 0; font-size: 22px; letter-spacing: 1px;">⚡ 电网 × 军工 | 专属投研内参</h2>
+                <p style="margin: 6px 0 0 0; font-size: 13px; color: #94a3b8;">{today_str} · 长线视角解码</p>
             </div>
 
             <div style="padding: 20px;">
@@ -137,8 +140,8 @@ def format_html_for_email(data):
                 </div>
     """
 
-    # --- 重点个股追踪 ---
-    html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 35px;">🎯 专属个股深度追踪</h3>"""
+    # --- 重点个股追踪 (新增历史长线模块) ---
+    html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 35px;">🎯 专属个股长短线追踪</h3>"""
     focus_stocks = data.get('focus_stocks', [])
     if not focus_stocks:
          html += "<p style='color: #64748b; font-size: 14px;'>个股数据生成失败，请检查 AI 接口状态。</p>"
@@ -146,6 +149,7 @@ def format_html_for_email(data):
         for stock in focus_stocks:
             name = stock.get('name', '未知')
             news = stock.get('news', '无最新动态')
+            history_trend = stock.get('history_trend', '长线位置评估暂无')
             advice = stock.get('advice', '暂无')
             reason = stock.get('reason', '')
             
@@ -154,20 +158,42 @@ def format_html_for_email(data):
             elif "减" in advice or "空" in advice: advice_color = "#16a34a" 
             
             html += f"""
-                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; position: relative;">
-                        <div style="position: absolute; top: 15px; right: 15px; background: {advice_color}; color: white; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; margin-bottom: 20px; position: relative;">
+                        <div style="position: absolute; top: 18px; right: 18px; background: {advice_color}; color: white; padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                             建议：{advice}
                         </div>
-                        <h4 style="margin: 0 0 8px 0; color: #1e293b; font-size: 16px;">🏢 {name}</h4>
-                        <p style="margin: 0 0 8px 0; font-size: 14px; color: #475569; line-height: 1.6;"><b>近期动态：</b>{news}</p>
-                        <p style="margin: 0; font-size: 13px; color: {advice_color}; font-weight: bold;">💡 操盘理由：{reason}</p>
+                        <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 17px; border-left: 4px solid #3b82f6; padding-left: 8px;">{name}</h4>
+                        
+                        <p style="margin: 0 0 8px 0; font-size: 14px; color: #475569; line-height: 1.6;">
+                            <b style="color: #334155;">📰 近期动态：</b>{news}
+                        </p>
+                        
+                        <div style="background-color: #f1f5f9; padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid #64748b;">
+                            <p style="margin: 0; font-size: 13.5px; color: #334155; line-height: 1.5;">
+                                <b>📈 长线位置评估：</b><br>{history_trend}
+                            </p>
+                        </div>
+
+                        <p style="margin: 0; font-size: 13.5px; color: {advice_color}; font-weight: bold;">
+                            💡 操盘理由：{reason}
+                        </p>
                     </div>
             """
 
-    html += """
+    # --- 💌 专属浪漫情话模块 ---
+    romantic_quote = data.get('romantic_quote', '今天也要开心呀。')
+    html += f"""
             </div>
-            <div style="background-color: #f1f5f9; text-align: center; padding: 15px; color: #64748b; font-size: 11px; border-top: 1px solid #e2e8f0;">
-                ⚠ AI 投研模型给出的加减仓建议仅基于公开资讯与量价基础推演，绝不构成任何直接投资建议。股市有风险，入市需谨慎。
+            
+            <div style="background: linear-gradient(135deg, #fff0f3 0%, #ffe4e6 100%); padding: 25px 30px; text-align: center; border-top: 1px dashed #fda4af;">
+                <div style="font-size: 24px; margin-bottom: 10px;">💌</div>
+                <p style="margin: 0; font-size: 15px; color: #be123c; line-height: 1.8; font-family: 'Kaiti', 'STKaiti', serif; font-style: italic; letter-spacing: 1px;">
+                    "{romantic_quote}"
+                </p>
+            </div>
+
+            <div style="background-color: #f8fafc; text-align: center; padding: 15px; color: #94a3b8; font-size: 11px; border-top: 1px solid #e2e8f0;">
+                ⚠ AI 模型加减仓建议及长线推演仅供复盘参考，不构成实质投资建议。
             </div>
         </div>
     </body>
@@ -179,7 +205,7 @@ def format_html_for_email(data):
 # 5. 发送纯 HTML 邮件
 # ==========================================
 def send_email(html_body):
-    print("📧 正在发送无附件版定向研报邮件...")
+    print("📧 正在发送终极浪漫投研邮件...")
     if not all([smtp_server, sender_email, sender_password, receiver_email]):
         print("❌ 邮件配置不全！")
         return
@@ -188,7 +214,7 @@ def send_email(html_body):
     msg['From'] = sender_email
     msg['To'] = receiver_email
     msg['Cc'] = cc_email
-    msg['Subject'] = f"⚡ {today_str} 军工与电网定向研报及个股追踪"
+    msg['Subject'] = f"⚡ {today_str} 军工与电网定向研报及个股长线追踪"
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     try:
