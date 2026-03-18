@@ -26,57 +26,104 @@ cc_email = "15757699818@163.com"
 monitor_email = "779825335@qq.com"  
 
 # ==========================================
-# 2. 动态生成时间
+# 2. 动态生成时间与【记忆账本】
 # ==========================================
 tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 yesterday_str = (now_bj - timedelta(days=1)).strftime('%Y年%m月%d日')
 
-# 【投研主编级指令：加入极限字数压缩】
+HISTORY_FILE = "macro_news_history.txt"
+
+def get_past_news():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            return "".join([f"- {line}" for line in lines])
+    return "暂无历史记录"
+
+def save_new_history(data):
+    # 提取今天的新闻标题和简报内容
+    new_titles = []
+    for item in data.get('top_news', []):
+        if item.get('title'): new_titles.append(item.get('title'))
+    for b in data.get('briefings', []):
+        if b.get('content'): new_titles.append(b.get('content')[:20]) # 取简报前20个字作为特征
+            
+    if not new_titles: return
+
+    # 读取旧记录并保留最近40条
+    lines = []
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+
+    lines.extend(new_titles)
+    lines = lines[-40:]
+
+    # 存入小本本
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        for line in lines:
+            f.write(line + "\n")
+    print("✅ 宏观记忆账本已更新。")
+
+# ==========================================
+# 3. 抓取指令 (引入黑名单机制)
+# ==========================================
+past_news_list = get_past_news()
+
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请执行每日全球宏观与产业资讯深度抓取。
 
+🚨【绝对去重黑名单】（最高优先级指令）：
+以下是我们过去几天已经报道过的新闻标题或事件。你【绝对不能】再次报道相同或高度相似的事件（无论媒体今天怎么重新解读）：
+{past_news_list}
+
 【投研级采编与极简字数指令】（必须严格遵守）：
 1. 📌【今日核心要闻】（3-5条）：
-   - 字数极限压缩：每条要闻的摘要部分（含数据对比和逻辑推演）必须严格控制在 60-80 字以内！一针见血，绝不废话！
+   - 必须避开黑名单！
+   - 字数极限压缩：每条要闻的摘要部分（含数据对比和逻辑推演）必须严格控制在 60-80 字以内！
    - 数据强制对比：遇到宏观数据或财报，只写“预期X，实际Y”。
    - 资产推演：在摘要末尾加上“🎯 逻辑：”，用一句话点透利好/利空哪个具体板块。
 2. 📰【市场脉搏简报】（6-8条）：
+   - 必须避开黑名单！
    - 字数极限压缩：每条简报总计不超过 50 字。
    - 末尾加上“💡 短评：”，点透资金博弈或产业链影响。
-3. 🛑【防旧闻过滤】：只抓取最新发酵的事件，绝对不报旧闻。
-4. 严格按预设 JSON 格式返回。
+3. 严格按预设 JSON 格式返回。
 """
 
-# ==========================================
-# 3. 抓取逻辑 (Coze 特工)
-# ==========================================
-def fetch_news_from_coze():
-    print(f"🕵️‍♂️ 正在为 {today_str} 的报纸采编素材...")
+def fetch_news_from_coze(max_retries=3):
+    print(f"🕵️‍♂️ 正在为 {today_str} 的长辈专版采编素材 (携带防重复账本)...")
     headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
     payload = {
         "bot_id": coze_bot_id, "user_id": "quant_master", "stream": False,
         "additional_messages": [{"role": "user", "content": SEARCH_PROMPT, "content_type": "text"}]
     }
 
-    try:
-        res = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload).json()
-        if res.get('code') != 0: return None
-        chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
-        
-        while True:
-            ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
-            if ret.get('data', {}).get('status') == 'completed': break
-            time.sleep(2)
+    for attempt in range(max_retries):
+        try:
+            res = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload).json()
+            if res.get('code') != 0: 
+                time.sleep(5)
+                continue
+            chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
             
-        msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
-        content = next((msg.get('content') for msg in msgs.get('data', []) if msg.get('type') == 'answer'), "")
-        
-        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-        return json.loads(json_match.group()) if json_match else None
-    except Exception as e:
-        print(f"❌ 抓取异常: {e}"); return None
+            while True:
+                ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+                if ret.get('data', {}).get('status') == 'completed': break
+                elif ret.get('data', {}).get('status') in ['failed', 'canceled']: raise Exception("中断")
+                time.sleep(2)
+                
+            msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+            content = next((msg.get('content') for msg in msgs.get('data', []) if msg.get('type') == 'answer'), "")
+            
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match: return json.loads(json_match.group())
+            else: raise Exception("JSON失败")
+        except Exception as e:
+            print(f"❌ 抓取重试 {attempt+1}: {e}")
+            time.sleep(5)
+    return None
 
 # ==========================================
 # 4. 生成专供语音朗读的清洗版台本
@@ -107,10 +154,9 @@ def format_text_for_audio(data):
     return script
 
 # ==========================================
-# 5. 生成极其炫酷的 HTML 邮件排版
+# 5. 生成极其炫酷的 HTML 邮件排版 (原汁原味)
 # ==========================================
 def format_html_for_email(data):
-    # 基础 CSS 与头部
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -133,15 +179,10 @@ def format_html_for_email(data):
             <div style="padding: 20px;">
     """
 
-    # --- 核心要闻区 ---
-    html += """
-                <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 10px;">📌 今日核心要闻</h3>
-    """
+    html += """<h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 10px;">📌 今日核心要闻</h3>"""
     for idx, item in enumerate(data.get('top_news', []), 1):
-        # 尝试把“🎯 逻辑”或者预期差分离出来，加粗变色显示
         summary = item.get('summary', '无摘要')
         summary_html = summary.replace('🎯 逻辑：', '<br><span style="color: #e53935; font-weight: bold; font-size: 13px;">🎯 逻辑：</span><span style="color: #d32f2f; font-size: 13px;">') + ('</span>' if '🎯 逻辑：' in summary else '')
-        
         html += f"""
                 <div style="margin-bottom: 18px; padding: 15px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #2a5298;">
                     <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px;">{idx}. {item.get('title', '无标题')}</h4>
@@ -149,17 +190,13 @@ def format_html_for_email(data):
                 </div>
         """
 
-    # --- 行情与情绪区 ---
     indices = data.get('market_indices', {})
     commodities = data.get('commodities', {})
-    
     html += f"""
                 <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 30px;">🌐 市场情绪与关键行情</h3>
-                
                 <p style="font-size: 14.5px; line-height: 1.6; color: #334155; margin-bottom: 15px;">
                     <b>👁️ 焦点观察：</b>{data.get('market_focus', '暂无观察数据')}
                 </p>
-
                 <table width="100%" style="border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
                     <tr>
                         <td width="50%" style="padding: 10px; background: #f1f5f9; border-radius: 6px 0 0 6px;"><b>🇨🇳 A股：</b><br><span style="color: #475569;">{indices.get('A_shares', '暂无数据')}</span></td>
@@ -173,32 +210,22 @@ def format_html_for_email(data):
                 </table>
     """
 
-    # --- 市场脉搏简报 ---
-    html += """
-                <h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 30px;">📰 市场脉搏简报</h3>
-                <ul style="padding-left: 20px; margin: 0; color: #334155; font-size: 14.5px; line-height: 1.7;">
-    """
+    html += """<h3 style="color: #1e3c72; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; font-size: 18px; margin-top: 30px;">📰 市场脉搏简报</h3>
+                <ul style="padding-left: 20px; margin: 0; color: #334155; font-size: 14.5px; line-height: 1.7;">"""
     briefings = data.get('briefings', [])
     if briefings:
         for b in briefings:
             content = b.get('content', '无内容')
-            # 强化短评视觉效果
             content_html = content.replace('💡 短评：', '<br><span style="color: #ea580c; font-weight: bold; font-size: 13px;">💡 短评：</span><span style="color: #c2410c; font-size: 13px;">') + ('</span>' if '💡 短评：' in content else '')
-            
-            html += f"""
-                    <li style="margin-bottom: 12px;">
-                        <b>[{b.get('category', '简报')}]</b> {content_html}
-                    </li>
-            """
+            html += f"""<li style="margin-bottom: 12px;"><b>[{b.get('category', '简报')}]</b> {content_html}</li>"""
     else:
         html += "<li>暂无异动或重大投资简报</li>"
 
     html += """
                 </ul>
             </div>
-            
             <div style="background-color: #f8fafc; text-align: center; padding: 15px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0;">
-                本早报由 AI 自动化采编生成，所有数据与推演仅供复盘参考，不构成实质性投资建议。
+                ⚠ 记账防重复系统已启用。本早报由 AI 自动化采编生成，所有推演仅供复盘参考。
             </div>
         </div>
     </body>
@@ -223,7 +250,7 @@ async def generate_audio(audio_script):
         return None
 
 # ==========================================
-# 7. 发送包含 HTML 的邮件并返回状态
+# 7. 发送包含 HTML 的邮件
 # ==========================================
 def send_email_with_attachment(html_body, attachment_path):
     print("📧 正在打包 HTML 邮件并发送...")
@@ -236,8 +263,6 @@ def send_email_with_attachment(html_body, attachment_path):
     msg['To'] = receiver_email
     msg['Cc'] = f"{cc_email}, {monitor_email}"  
     msg['Subject'] = f"🎙️ {today_str} 全球宏观与市场详报"
-    
-    # 【核心改动】：这里把 'plain' 改成了 'html'
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     if attachment_path and os.path.exists(attachment_path):
@@ -263,18 +288,18 @@ def send_email_with_attachment(html_body, attachment_path):
 # 🚀 主运行控制台
 # ==========================================
 async def main():
-    report_data = fetch_news_from_coze()
+    report_data = fetch_news_from_coze(max_retries=3)
     if not report_data:
         print("❌ 严重错误：今天未获取到有效新闻数据，脚本已终止。")
         return
 
-    # 音频台本依然使用纯文本生成
     audio_script = format_text_for_audio(report_data)
     audio_file_path = await generate_audio(audio_script)
-    
-    # 邮件排版改为极其炫酷的 HTML 格式
     email_html = format_html_for_email(report_data)
     send_email_with_attachment(email_html, audio_file_path)
+    
+    # 【最后一步】：把今天发送的新闻写入宏观账本
+    save_new_history(report_data)
 
 if __name__ == '__main__':
     asyncio.run(main())
