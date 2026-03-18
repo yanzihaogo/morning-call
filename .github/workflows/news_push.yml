@@ -2,14 +2,16 @@ name: 每日宏观早报抓取与双轨推送
 
 on:
   schedule:
-    # 避开 UTC 0:00，改为 UTC 的 23:45 (即北京时间早上 7:45)
-    - cron: '29 22 * * *' 
+    - cron: '30 22 * * *'  # 保持你现在的时间不变
   workflow_dispatch: 
+
+# 【关键新增1】：赋予机器人写入权限
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,12 +28,17 @@ jobs:
 
       - name: Run News Scraper and Audio Generator
         env:
-          # 所有的环境变量都在这里
           COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
           COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
         run: python main.py
+
+      # 【关键新增2】：提交宏观账本
+      - name: Commit and Push Macro History Ledger
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add macro_news_history.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update macro news ledger [skip ci]" && git push)
