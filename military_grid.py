@@ -26,17 +26,18 @@ now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 【投研与浪漫双核指令】
+# 2. 【投研与浪漫双核指令 - 扩容版】
 # ==========================================
+# 核心改动：扩大了行业扫描雷达，并将追踪股票增加至6只
 SEARCH_PROMPT = f"""
-今天是 {today_str}。请你作为资深A股军工与智能电网行业研究员，兼具文艺感，执行定向任务。
+今天是 {today_str}。请你作为资深A股研究员（精通军工、电网、新能源及核心资产），兼具文艺感，执行定向任务。
 
 【绝对硬性指令 - 严禁交白卷】：
-1. 🏭【行业精要】（2-4条）：搜索“国防军工”与“智能电网”的重大产业政策或订单。如果是周末，请复盘上周五资金异动。
-2. ⚖️【板块仓位建议】：给出军工和电网板块的初步投资建议（加仓/减仓/观望）。
-3. 🎯【四只金股长短线双轨追踪】（绝对硬性要求）：必须且只能分析【航发科技、航天动力、航发控制、奥瑞德】。
+1. 🏭【行业精要】（2-4条）：搜索“国防军工”、“智能电网”与“新能源/化工新材料”的重大产业政策或订单。如果是周末，请复盘上周五资金异动。
+2. ⚖️【板块仓位建议】：给出上述核心板块的初步投资建议（加仓/减仓/观望）。
+3. 🎯【六只金股长短线双轨追踪】（绝对硬性要求）：必须且只能分析【航发科技、航天动力、航发控制、奥瑞德、长江电力、多氟多】。
    - 【近期动态】：复盘其最新的基本面、公告或资金面。
-   - 【历史长线位置】（新增要求）：结合其过去1-3年的走势，简述其目前处于历史的什么阶段（如：超跌底部潜伏区、历史高位震荡、主升浪突破等），辅助判断长线安全边际。
+   - 【历史长线位置】：结合其过去1-3年的走势，简述其目前处于历史的什么阶段（如：超跌底部潜伏区、历史高位震荡、主升浪突破等），辅助判断长线安全边际。
    - 【操作建议】：给出操作建议及具体理由。
 4. 💌【专属浪漫彩蛋】：在所有硬核分析结束后，请你原创一句文艺、深情、极具美感且每天绝对不重样的浪漫情话（约30-50字），作为今天的早安彩蛋。
 
@@ -47,10 +48,12 @@ SEARCH_PROMPT = f"""
     ],
     "sector_advice": "综合建议：加仓/减仓/观望。理由：...",
     "focus_stocks": [
-        {{"name": "航发科技", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "航天动力", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "航发控制", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
-        {{"name": "奥瑞德", "news": "近期动态复盘", "history_trend": "长线历史位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}}
+        {{"name": "航发科技", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航天动力", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "航发控制", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "奥瑞德", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "长江电力", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}},
+        {{"name": "多氟多", "news": "近期动态复盘", "history_trend": "长线位置分析及所处阶段", "advice": "加仓/减仓/持有/观望", "reason": "具体理由"}}
     ],
     "romantic_quote": "原创的不重样文艺情话"
 }}
@@ -60,7 +63,7 @@ SEARCH_PROMPT = f"""
 # 3. 抓取逻辑
 # ==========================================
 def fetch_news_from_coze():
-    print(f"🕵️‍♂️ 正在执行【军工/电网】行业投研及情话生成...")
+    print(f"🕵️‍♂️ 正在执行行业投研及情话生成...")
     headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
     payload = {
         "bot_id": coze_bot_id, "user_id": "quant_master", "stream": False,
@@ -106,7 +109,7 @@ def format_html_for_email(data):
         <div style="max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 8px 16px rgba(0,0,0,0.06);">
             
             <div style="background: linear-gradient(90deg, #1e293b 0%, #334155 100%); color: #ffffff; padding: 25px 20px; border-bottom: 4px solid #3b82f6;">
-                <h2 style="margin: 0; font-size: 22px; letter-spacing: 1px;">⚡ 电网 × 军工 | 专属投研内参</h2>
+                <h2 style="margin: 0; font-size: 22px; letter-spacing: 1px;">⚡ 核心资产与赛道 | 专属投研内参</h2>
                 <p style="margin: 6px 0 0 0; font-size: 13px; color: #94a3b8;">{today_str} · 长线视角解码</p>
             </div>
 
@@ -140,7 +143,7 @@ def format_html_for_email(data):
                 </div>
     """
 
-    # --- 重点个股追踪 (新增历史长线模块) ---
+    # --- 重点个股追踪 ---
     html += """<h3 style="color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 18px; margin-top: 35px;">🎯 专属个股长短线追踪</h3>"""
     focus_stocks = data.get('focus_stocks', [])
     if not focus_stocks:
@@ -214,7 +217,7 @@ def send_email(html_body):
     msg['From'] = sender_email
     msg['To'] = receiver_email
     msg['Cc'] = cc_email
-    msg['Subject'] = f"⚡ {today_str} 军工与电网定向研报及个股长线追踪"
+    msg['Subject'] = f"⚡ {today_str} 核心资产与赛道定向研报"
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
     try:
