@@ -2,16 +2,18 @@ name: 每日宏观早报抓取与双轨推送
 
 on:
   schedule:
-    - cron: '30 22 * * *'  # 保持你现在的时间不变
+    # 每天 UTC 22:30 (北京时间早上 6:30 触发)
+    - cron: '30 22 * * *'
   workflow_dispatch: 
 
-# 【关键新增1】：赋予机器人写入权限
+# 赋予机器人写入代码仓库的权限（为了保存记账本）
 permissions:
   contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,9 +35,9 @@ jobs:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
         run: python main.py
 
-      # 【关键新增2】：提交宏观账本
       - name: Commit and Push Macro History Ledger
         run: |
           git config --global user.name "github-actions[bot]"
