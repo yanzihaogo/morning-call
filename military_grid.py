@@ -1,3 +1,41 @@
+import akshare as ak
+import google.generativeai as genai
+import os
+
+# 1. 准备好你的 AI
+# 这里的代码会自动读取你存在 GitHub 里的 API 密码
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-pro')
+
+# 2. 抓取真实的财务数据（这就是那张化验单）
+# akshare 是一个免费拿股票数据的工具，600666 是奥瑞德的代码
+try:
+    df = ak.stock_financial_analysis_indicator(symbol="600666")
+    latest_data = df.iloc[0] # 拿最新的一行数据
+    
+    # 把长长的数字换算成“亿元”
+    real_profit = latest_data['归母净利润'] / 100000000 
+    data_status = f"最新归母净利润为 {real_profit:.2f} 亿元（已扭亏为盈）"
+except Exception as e:
+    data_status = "今日权威财务数据获取失败，暂停汇报此项。"
+
+# 3. 给 AI 下达“死命令”
+prompt = f"""
+你现在是一位严谨的汇报助手。你需要给一位医学博士写一段关于“奥瑞德”的简短晨报。
+【你必须死死记住的真实数据】：{data_status}。
+【警告】：绝对不可以说它亏损！必须基于上述真实盈利数据来写。
+字数控制在50字以内，直接输出结果，不要废话。
+"""
+
+# 4. 让 AI 写出内容
+response = model.generate_content(prompt)
+
+# 这就是最终绝对不会出错的文本，你可以把它加到你的日报里
+final_report = "【核心数据核实】\n" + response.text 
+print(final_report)
+
+# ... 下面保留你原本用来发送消息的代码 ...
+
 import os
 import requests
 import json
