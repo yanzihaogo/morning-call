@@ -2,7 +2,7 @@ name: 军工电网学术定向研报
 
 on:
   schedule:
-    - cron: '00 23 * * *' 
+    - cron: '00 23 * * *' # 北京时间早上 7:00 触发
   workflow_dispatch: 
 
 permissions:
