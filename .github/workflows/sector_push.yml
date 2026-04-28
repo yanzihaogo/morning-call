@@ -26,10 +26,12 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         run: python military_grid.py
-      - name: Commit Ledger
+      - name: Commit and Push History Ledger
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-          git add news_history.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update sector ledger [skip ci]" && git push)
+          # 关键点：增加 || echo 防止报错，并且确保文件名对应
+          git add news_history.txt macro_news_history.txt || echo "No files to add"
+          # 只有在真的有改动时才提交，防止空提交报错
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update ledger [skip ci]" && git push origin main)
