@@ -9,7 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
-# 实时日志输出，方便在 GitHub Actions 监控
+# 实时日志输出
 def log(message):
     print(f"[{datetime.now(timezone(timedelta(hours=8))).strftime('%H:%M:%S')}] {message}")
     sys.stdout.flush()
@@ -59,44 +59,44 @@ journal_rotation = ["NEJM, Lancet", "Nature Medicine, Cell", "JAMA, BMJ", "Scien
 
 SEARCH_PROMPT = f"""
 今天是 {today_str}。请执行最高专业等级的学术复盘与多维投研任务。
-🚨【绝对去重黑名单】：{past_news_list}
+🚨【去重黑名单】：{past_news_list}
 
-【硬性指令 - 严禁虚构事实】：
-1. 🏭【行业精要】（2-4条）：深度解析军工、电网、新能源及中国船舶产业链政策逻辑。
+【硬性指令】：
+1. 🏭【行业精要】：深度解析军工、电网、新能源及中国船舶产业链逻辑。
 2. ⚖️【板块建议】：详细说明仓位比例及驱动力。
 3. 🧬【医学博士前沿】（2-4条）：
-   - 受众背景：医学博士。今日轮换顶刊：{journal_rotation}。
-   - 🚨【关键要求】：若研究涉及具体药物干预，必须在[科学问题]或[技术方法]的描述中，括号标注具体的药物通用名（Generic Name）。
-   - 结构（每条不少于250字）：①研究团队及方向；②科学痛点（需标药物名）；③技术方法与实验模型；④核心创新突破点（禁止空泛）；⑤未来转化临床意义。
-4. 🌟【优选自选股】（1只）：精选基本面爆发或机构调仓标的。
+   - 受众：医学博士。轮换顶刊：{journal_rotation}。
+   - 🚨【关键要求】：若涉及具体药物干预，必须在[科学问题]或[技术方法]中括号标注具体的药物通用名（Generic Name）。
+   - 结构（每条250字+）：①研究团队及方向；②科学痛点（标注药物通用名）；③技术方法与实验模型；④核心创新突破点；⑤未来转化临床意义。
+4. 🌟【优选自选股】（1只）：精选优质标的及研判逻辑。
 5. 🎯【资产四维复盘】：必须详尽分析【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 🚨【严禁脑补】：严禁臆测未披露财报。若无公告，重点分析行业格局、订单预期及大宗异动。
-   - 结构（每只标的不少于180字）：
-     - [量价分析]: 测算支撑位/压力位，分析近期K线特征。
-     - [资金面]: 追踪主力、北向及席位变动。
-     - [基本面复盘]: 结合所属产业链地位及最新行业数据。
-     - [策略建议]: 明确操作点位与持有逻辑。
-6. 💌【专属浪漫彩蛋】：原创情话。🚨严禁出现任何金融、交易、K线或医学术语。
+   - 🚨【严禁脑补】：若未披露财报，重点分析行业格局、订单预期及资金面。
+   - 每只标的分析不少于180字，包含[量价分析]、[资金面]、[基本面复盘]、[策略建议]。
+6. 💌【专属浪漫彩蛋】：原创情话。🚨严禁出现任何金融、交易或医学术语。
 
 🚨【强制 JSON 格式】：
 {{
     "sector_news": [{{ "title": "标题", "summary": "摘要" }}],
-    "sector_advice": "建议逻辑",
-    "medical_news": [{{ "title": "文献名", "journal": "来源", "summary": "①团队...②痛点...③技术...④突破...⑤价值" }}],
-    "watchlist_recommendations": [{{ "name": "名称", "ticker": "代码", "logic": "详细逻辑" }}],
-    "focus_stocks": [{{ "name": "名", "advice": "建议", "key_levels": "点位", "fund_flow": "资金", "history_trend": "位置", "reason": "【四维拆解】详尽逻辑" }}],
-    "romantic_quote": "浪漫情话"
+    "sector_advice": "建议",
+    "medical_news": [{{ "title": "文献名", "journal": "来源", "summary": "结构化长摘要" }}],
+    "watchlist_recommendations": [{{ "name": "名称", "ticker": "代码", "logic": "逻辑" }}],
+    "focus_stocks": [{{ "name": "股票名", "advice": "操作建议", "key_levels": "点位", "fund_flow": "资金", "history_trend": "位置", "reason": "【四维拆解】详尽逻辑" }}],
+    "romantic_quote": "情话"
 }}
 """
 
 # ==========================================
-# 4. 抓取逻辑 (包含断点重试与静默轮询)
+# 4. 抓取逻辑 (修正语法错误版)
 # ==========================================
 def fetch_news_from_coze(retry=0):
     if retry > 1: return None
     log(f"🚀 启动【博士版】采编流程 (尝试 {retry+1})...")
     headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
-    payload = {{ "bot_id": coze_bot_id, "user_id": "quant_master", "additional_messages": [{"role": "user", "content": SEARCH_PROMPT, "content_type": "text"}] }}
+    payload = {
+        "bot_id": coze_bot_id, 
+        "user_id": "quant_master", 
+        "additional_messages": [{"role": "user", "content": SEARCH_PROMPT, "content_type": "text"}]
+    }
 
     try:
         response = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload, timeout=60)
@@ -106,24 +106,24 @@ def fetch_news_from_coze(retry=0):
             return None
         
         chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
-        log("⏳ AI 正在深度处理数据（预计 2-4 分钟），请稍候...")
+        log("⏳ AI 正在处理海量医学与金融数据，请稍候...")
         
-        for i in range(35): # 延长等待至约 7 分钟
-            ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={{chat_id}}&conversation_id={{conversation_id}}', headers=headers).json()
-            status = ret.get('data', {{}}).get('status')
+        for i in range(35): # 约 7 分钟上限
+            ret_res = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+            status = ret_res.get('data', {}).get('status')
             if status == 'completed':
-                log("✅ 生成成功！")
-                msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={{chat_id}}&conversation_id={{conversation_id}}', headers=headers).json()
-                content = next((m.get('content') for m in msgs.get('data', []) if m.get('type') == 'answer'), "")
-                return json.loads(re.search(r'\{{.*\}}', content, re.DOTALL).group())
+                log("✅ 数据生成完毕！")
+                msg_list = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+                content = next((m.get('content') for m in msg_list.get('data', []) if m.get('type') == 'answer'), "")
+                return json.loads(re.search(r'\{.*\}', content, re.DOTALL).group())
             elif status in ['failed', 'canceled']:
-                log(f"⚠️ 状态异常 ({{status}})，准备重试...")
+                log(f"⚠️ 状态异常 ({status})，重试中...")
                 time.sleep(10)
                 return fetch_news_from_coze(retry + 1)
             time.sleep(12)
         return None
     except Exception as e:
-        log(f"❌ 运行捕获异常: {{e}}")
+        log(f"❌ 运行捕获异常: {e}")
         return fetch_news_from_coze(retry + 1)
 
 # ==========================================
@@ -136,7 +136,7 @@ def format_html(data):
     <body style="margin: 0; padding: 15px; font-family: sans-serif; background-color: #f3f4f6;">
         <div style="max-width: 750px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
             <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #ffffff; padding: 25px 20px; border-bottom: 3px solid #3b82f6; text-align: center;">
-                <h2 style="margin: 0; font-size: 20px; letter-spacing: 1.5px;">⚡ 博士级定制内参 × 🧬 学术前沿雷达</h2>
+                <h2 style="margin: 0; font-size: 20px;">⚡ 博士级定制内参 × 🧬 学术前沿雷达</h2>
                 <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">{today_str} · 专业版深度追踪</p>
             </div>
             <div style="padding: 20px;">
@@ -171,7 +171,7 @@ def format_html(data):
 
 def send_email(body):
     msg = MIMEMultipart()
-    msg['Subject'] = f"⚡ {today_str} 核心资产深度复盘 × 🧬 医学顶刊雷达"
+    msg['Subject'] = f"⚡ {today_str} 核心资产追踪 × 🧬 医学前沿雷达"
     msg['From'], msg['To'] = sender_email, receiver_email
     msg.attach(MIMEText(body, 'html', 'utf-8'))
     with smtplib.SMTP_SSL(smtp_server, 465) as s:
@@ -180,9 +180,9 @@ def send_email(body):
     log("✅ 博士专版邮件推送成功！")
 
 if __name__ == '__main__':
-    log("🎬 脚本正式启动...")
+    log("🎬 脚本已启动...")
     report_data = fetch_news_from_coze()
     if report_data:
         send_email(format_html(report_data))
         save_new_history(report_data)
-        log("✨ 任务成功闭环。")
+        log("✨ 任务成功闭合。")
