@@ -24,62 +24,63 @@ RECEIVER_EMAIL = "779825335@qq.com"
 CC_EMAIL = "15757699818@163.com"
 
 if not API_KEY:
-    log("❌ 错误：未检测到 GOOGLE_API_KEY，请检查 GitHub Secrets。")
+    log("❌ 错误：未检测到 GOOGLE_API_KEY。")
     sys.exit(1)
 
-# 初始化新版 Client
+# 初始化 2026 新版 Client
 client = genai.Client(api_key=API_KEY)
 
 bj_tz = timezone(timedelta(hours=8))
 today_str = datetime.now(bj_tz).strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 核心指令 (Prompt)
+# 2. 博士级蒸馏指令 (针对 2.5 系列优化)
 # ==========================================
 STOCKS = ["航发科技", "航天动力", "航发控制", "长江电力", "多氟多", "英维克", "中国能建", "中国船舶", "云南锗业"]
 
 PROMPT = f"""
 今天是 {today_str}。请执行[博士级逻辑蒸馏]任务。
 标的名单：{', '.join(STOCKS)}
+
 要求：
-1. 个股复盘需关联造船板价格、锗价及宏观流动性。
-2. 医学综述必须标注[药物通用名]，包含研究团队、痛点、方法、突破、价值。
-输出要求：直接返回 HTML 代码，使用色块美化排版。
+1. 【量化复盘】：分析 9 只个股。关联造船板价格、锗价及宏观流动性。给出具体的支撑/压力位。
+2. 【医学雷达】：检索顶刊文献。必须标注[药物通用名]，包含团队、痛点、方法、突破、价值。
+3. 【排版】：直接返回带有背景色块的 HTML 代码，确保专业美观。
 """
 
 # ==========================================
-# 3. 运行逻辑 (带降级保护)
+# 3. 运行逻辑 (匹配 2.5/2.0 模型 ID)
 # ==========================================
 def run_task():
-    # 2026 年标准模型 ID 列表（按优先级排序）
-    # 有时 404 是因为模型需要 'models/' 前缀，有时是因为 1.5-pro 暂时不可用
-    model_candidates = ['gemini-1.5-pro', 'gemini-1.5-flash']
+    # 根据你的面板截图，这些是 2026 年你可用的模型 ID
+    model_candidates = [
+        'gemini-2.5-pro', 
+        'gemini-2.5-flash', 
+        'gemini-2.0-flash'
+    ]
     
     content = None
     
     for model_id in model_candidates:
-        log(f"📡 尝试调用模型: {model_id} ...")
+        log(f"📡 尝试调用次世代模型: {model_id} ...")
         try:
+            # 2026 版新语法调用
             response = client.models.generate_content(
                 model=model_id, 
                 contents=PROMPT
             )
             content = response.text
             if content:
-                log(f"✅ 使用 {model_id} 成功生成内容")
+                log(f"✅ 使用 {model_id} 蒸馏成功")
                 break
         except Exception as e:
-            error_str = str(e)
-            if "404" in error_str:
-                log(f"⚠️ 模型 {model_id} 报 404 错误，可能是权限或 ID 变更，准备尝试下一个...")
-            else:
-                log(f"❌ 调用 {model_id} 时发生其他错误: {error_str}")
+            log(f"⚠️ 模型 {model_id} 调用失败，尝试下一个候选者。详情: {str(e)}")
     
     if not content:
-        log("❌ 所有候选模型均调用失败。")
+        log("❌ 所有可用模型（2.5/2.0 系列）均无法连接。")
         return None
 
-    # 清理 Markdown 标签
+    # 清理 Markdown 代码块
     if "```html" in content:
         content = re.search(r"```html(.*?)```", content, re.DOTALL).group(1)
     elif "```" in content:
@@ -88,9 +89,9 @@ def run_task():
     return content.strip()
 
 def send_mail(html_body):
-    log("📧 正在准备发送邮件...")
+    log("📧 正在打包推送到邮箱...")
     msg = MIMEMultipart()
-    msg['Subject'] = f"⚡ {today_str} 核心资产追踪 × 🧬 医学博士雷达"
+    msg['Subject'] = f"⚡ {today_str} 核心资产追踪 × 🧬 医学博士雷达 (2.5 Pro 版)"
     msg['From'], msg['To'] = SENDER_EMAIL, RECEIVER_EMAIL
     
     final_html = f"""
@@ -106,16 +107,15 @@ def send_mail(html_body):
         with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, [RECEIVER_EMAIL, CC_EMAIL], msg.as_string())
-        log("🎉 邮件已送达。")
+        log("🎉 日报已送达邮箱。")
     except Exception as e:
-        log(f"❌ 邮件发送失败：{str(e)}")
+        log(f"❌ 邮件模块报错：{str(e)}")
 
 if __name__ == '__main__':
-    log("🎬 脚本已启动 (Gemini 2026 SDK + 降级保护)")
+    log("🎬 脚本启动 (已适配 Gemini 2.5 权限)")
     report_content = run_task()
     if report_content:
         send_mail(report_content)
-        log("✨ 任务闭环。")
+        log("✨ 今日自动化流程完美闭环。")
     else:
-        log("❌ 流程中断：未能生成内容。")
         sys.exit(1)
