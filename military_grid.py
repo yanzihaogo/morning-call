@@ -30,17 +30,17 @@ bj_tz = timezone(timedelta(hours=8))
 today_str = datetime.now(bj_tz).strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 核心自检级提示词 (注入反花体字指令)
+# 2. 核心自检级提示词
 # ==========================================
 STOCKS = ["航发科技", "航天动力", "航发控制", "长江电力", "多氟多", "英维克", "中国能建", "中国船舶", "云南锗业"]
 SECTORS = ["人工智能", "军工装备", "电池", "小金属/贵金属", "银行", "多元金融"]
 
 PROMPT = f"""
-今天是 {today_str}。请执行最高专业等级的[定量数据投研]采编任务。
+今天是 {today_str}。请执行最高专业等级的[定量数据投研]采编任务 🎀。
 
-🚨【最高红线指令 - 严禁特殊字体】：
-所有的数字（0-9）和英文字母（a-z, A-Z）必须使用最标准、最基础的常规字符。
-绝对禁止使用任何数学粗体、双线体、花体、全角字符或任何特殊的 Unicode 变体字符（严禁输出如 𝟓, 𝟚_𝟘_𝟚_𝟚, 𝐀𝐁𝐂 这样的花体）。
+🚨【最高红线指令 - 严禁花体字】：
+所有的数字（0-9）和英文字母（a-z, A-Z）必须使用最标准的常规字符。
+绝对禁止使用任何数学粗体、花体、全角字符或任何特殊的 Unicode 变体字符（严禁输出如 𝟓, 𝟚_𝟘_𝟚_𝟚, 𝐀𝐁𝐂 这样的花体）。
 
 🚨【投研硬性要求】：
 1. **严禁模糊指代**：必须指明具体名称（如：微软公司、宁德时代），严禁使用“某公司”、“AI巨头”。
@@ -54,7 +54,7 @@ PROMPT = f"""
             "name": "板块名称",
             "gain_loss": "今日涨跌幅(%)",
             "capital_flow": "净流入/流出金额及占该板块总成交额的比例(%)",
-            "volume_status": "相比昨日是放量、缩量还是基本持平(判断增量资金是否介入)",
+            "volume_status": "相比昨日是放量、缩量还是基本持平",
             "accumulated_flow": "统计近 5个/20个交易日的累计资金流向趋势",
             "news_flash": [
                 {{
@@ -83,16 +83,16 @@ PROMPT = f"""
 """
 
 # ==========================================
-# 3. 智能抗压运行逻辑 (解决 503 报错与花体清洗)
+# 3. 智能抗压排队逻辑 (升级为 3.5 次世代模型)
 # ==========================================
 def run_task():
-    # 建立多模型梯队防线
-    model_candidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    # 锁定你有额度的最新款性能甜点卡：Gemini 3.5 Flash 和 3.0 Flash
+    model_candidates = ['gemini-3.5-flash', 'gemini-3-flash']
+    max_retries = 3 
     
     for model_id in model_candidates:
-        max_retries = 3
         for attempt in range(max_retries):
-            log(f"📡 正在请求 {model_id} (尝试第 {attempt+1}/{max_retries} 次)...")
+            log(f"📡 正在激活次世代引擎 {model_id} (尝试 {attempt+1}/{max_retries})...")
             try:
                 response = client.models.generate_content(
                     model=model_id, 
@@ -102,26 +102,25 @@ def run_task():
                 
                 raw_text = response.text
                 if not raw_text:
-                    raise Exception("返回内容为空")
+                    raise Exception("机房返回数据为空包")
                 
-                # --- 核心黑科技：暴力清洗花体字与特殊符号 ---
-                # NFKC 标准可以将各种数学花体字（如 𝟓, 𝟚𝟘𝟚𝟞）完美打回常规 ASCII 字符原型（5, 2026）
+                # 物理清洗所有的花体字乱码
                 purified_text = unicodedata.normalize('NFKC', raw_text)
                 
                 data = json.loads(purified_text)
-                log(f"✅ 成功通过 {model_id} 获取数据，并完成纯净度清洗。")
+                log(f"✅ 成功接通 {model_id}！获取到纯净版定量数据。")
                 return data
                 
             except Exception as e:
                 err_msg = str(e)
-                # 捕获 503 临时超载或者不可用状态
-                if "503" in err_msg or "UNAVAILABLE" in err_msg:
-                    log(f"⚠️ 触发服务器超载限制(503)。原地进入冷却期...")
+                log(f"⚠️ 遇到算力波动: {err_msg}")
+                if "503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg:
                     if attempt < max_retries - 1:
-                        time.sleep(15) # 等待15秒后进行下一次重试
+                        wait_time = 15 * (attempt + 1)
+                        log(f"⏳ 触发防撞墙机制，等待 {wait_time} 秒后重试...")
+                        time.sleep(wait_time)
                         continue
-                log(f"❌ 当前尝试失败: {err_msg}")
-                break # 跳出当前重试循环，尝试下一个备用模型
+                break # 如果不是拥堵问题，或者重试用尽，直接切下一个模型
                 
     return None
 
@@ -131,7 +130,6 @@ def run_task():
 def format_html(data):
     html_content = ""
     
-    # 行业风向标板块
     html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 10px;'>🌐 核心行业风向标 & 定量资金流</h3>"
     for sector in data.get('sectors_data', []):
         html_content += f"""
@@ -161,7 +159,6 @@ def format_html(data):
             html_content += "</div>"
         html_content += "</div>"
 
-    # 个股追踪板块
     html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 30px;'>📈 资产四维精读报告</h3>"
     for stock in data.get('stock_analysis', []):
         html_content += f"""
@@ -174,7 +171,6 @@ def format_html(data):
         </div>
         """
 
-    # 浪漫彩蛋板块
     if data.get('romantic_quote'):
         html_content += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
@@ -185,22 +181,22 @@ def format_html(data):
     return html_content
 
 def send_mail(html_body):
-    log("📧 正在发送全自检纯净版研报...")
+    log("📧 正在发送终极净化版投研内参...")
     msg = MIMEMultipart()
     msg['Subject'] = f"✨ {today_str} 板块量化透视 × 行业精准要闻 🎀"
     msg['From'], msg['To'] = SENDER_EMAIL, RECEIVER_EMAIL
     
-    # 强制将全局字体锁死在标准无衬线字体，防止客户端回退到花体字库
+    # 全局无衬线现代字体集，彻底断绝任何客户端解析出特殊花体的路径
     final_html = f"""
     <html>
     <head><meta charset="utf-8"></head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.7; color: #334155; max-width: 750px; margin: 0 auto; padding: 15px; background-color: #f8fafc;">
         <div style="text-align: center; margin-bottom: 25px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.01);">
-            <h2 style="color: #1e40af; margin: 0; font-size: 22px;">🌤 shrink Daily Financial Intelligence</h2>
+            <h2 style="color: #1e40af; margin: 0; font-size: 22px;">🌤️ Daily Financial Intelligence</h2>
             <p style="color: #94a3b8; font-size: 12px; margin-top: 5px; letter-spacing: 1px;">QUANTITATIVE FLOW & PRECISION NEWS</p>
         </div>
         {html_body}
-        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · 自愈重试系统已启用</p>
+        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · Gemini 3.5 引擎驱动</p>
     </body>
     </html>
     """
@@ -211,18 +207,18 @@ def send_mail(html_body):
         with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, [RECEIVER_EMAIL, CC_EMAIL], msg.as_string())
-        log("🎉 邮件已精准送达。")
+        log("🎉 纯净版早报投递成功。")
     except Exception as e:
-        log(f"❌ 发信终端异常: {str(e)}")
+        log(f"❌ 邮件模块末端异常: {str(e)}")
 
 # ==========================================
-# 🚀 稳定闭环入口
+# 🚀 闭环入口
 # ==========================================
 if __name__ == '__main__':
-    log("🎬 脚本启动 (高容错降级纯净版)...")
+    log("🎬 脚本启动 (3.5次世代主力舰版)...")
     report_data = run_task()
     if report_data:
         send_mail(format_html(report_data))
     else:
-        log("❌ 最终结论：所有模型在重试后均遭遇算力过载，任务终止。")
+        log("❌ 最终结论：所有模型均未能返回有效数据，任务终止。")
         sys.exit(1)
