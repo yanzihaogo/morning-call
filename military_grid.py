@@ -30,69 +30,79 @@ bj_tz = timezone(timedelta(hours=8))
 today_str = datetime.now(bj_tz).strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 核心自检级提示词
+# 2. 核心提示词 (加入医学与A股红绿逻辑)
 # ==========================================
 STOCKS = ["航发科技", "航天动力", "航发控制", "长江电力", "多氟多", "英维克", "中国能建", "中国船舶", "云南锗业"]
 SECTORS = ["人工智能", "军工装备", "电池", "小金属/贵金属", "银行", "多元金融"]
 
 PROMPT = f"""
-今天是 {today_str}。请执行最高专业等级的[定量数据投研]采编任务 🎀。
+今天是 {today_str}。请执行最高专业等级的[定量数据投研]与[医学顶刊精读]采编任务 🎀。
 
 🚨【最高红线指令 - 严禁花体字】：
-所有的数字（0-9）和英文字母（a-z, A-Z）必须使用最标准的常规字符。
-绝对禁止使用任何数学粗体、花体、全角字符或任何特殊的 Unicode 变体字符（严禁输出如 𝟓, 𝟚_𝟘_𝟚_𝟚, 𝐀𝐁𝐂 这样的花体）。
+绝对禁止使用任何数学粗体、花体、全角字符或特殊的 Unicode 变体字符（严禁输出如 𝟓, 𝟚_𝟘_𝟚_𝟚, 𝐀𝐁𝐂）。所有数字和字母必须最常规。
 
-🚨【投研硬性要求】：
-1. **严禁模糊指代**：必须指明具体名称（如：微软公司、宁德时代），严禁使用“某公司”、“AI巨头”。
-2. **新闻自带链接与时空要素**：每条新闻摘要末尾必须提供原始链接，开头写明【发布时间+地点】。
-3. **不要走走势总结**：只精准摘录 3-5 条行业重大核心快讯。
+🚨【A股红绿色彩与估值学】：
+在分析个股时，必须遵循中国 A 股“红涨绿跌”的习惯，判断其估值位置并输出严格的颜色代码：
+- 看多/低位支撑/买入机会：必须输出红色代码 `#ef4444`
+- 看空/高位压力/风险提示：必须输出绿色代码 `#10b981`
+- 震荡/观望/中性：必须输出橙色代码 `#f97316`
 
-### 📦 结构化 JSON 规范：
+### 📦 结构化 JSON 规范 (必须严格包含全部字段)：
 {{
     "sectors_data": [
         {{
             "name": "板块名称",
             "gain_loss": "今日涨跌幅(%)",
-            "capital_flow": "净流入/流出金额及占该板块总成交额的比例(%)",
-            "volume_status": "相比昨日是放量、缩量还是基本持平",
-            "accumulated_flow": "统计近 5个/20个交易日的累计资金流向趋势",
+            "capital_flow": "净流入额及占该板块总成交比例(%)",
+            "volume_status": "相比昨日放量/缩量状态",
+            "accumulated_flow": "近5/20个交易日累计资金流向",
             "news_flash": [
                 {{
                     "time_location": "时间+地点",
-                    "entity": "发布机构/公司全称",
+                    "entity": "发布机构(严禁模糊指代)",
                     "summary": "硬核内容摘要",
-                    "url": "原始新闻参考链接"
+                    "url": "原始新闻链接"
                 }}
             ]
+        }}
+    ],
+    "medical_news": [
+        {{
+            "journal_and_time": "期刊名与发表时间",
+            "drug_name": "靶向药物通用名",
+            "background": "研究痛点背景",
+            "method_breakthrough": "核心技术与突破数据",
+            "clinical_value": "对临床路径的实质改变"
         }}
     ],
     "stock_analysis": [
         {{
             "name": "股票名称",
             "logic": "核心逻辑",
-            "levels": "支撑位/压力位",
-            "action": "极简操作建议"
+            "levels": "支撑位/压力位数字",
+            "action": "极简操作建议",
+            "valuation_color": "根据估值必须输出 #ef4444 或 #10b981 或 #f97316 之一"
         }}
     ],
     "romantic_quote": "专属浪漫粉色彩蛋（绝对禁止出现金融和医学术语）"
 }}
 
-请针对以下内容进行全量深度计算：
+内容全量计算范围：
 板块：{', '.join(SECTORS)}
 个股：{', '.join(STOCKS)}
+（必须包含 2 篇顶级医学文献复盘）
 """
 
 # ==========================================
-# 3. 智能抗压排队逻辑 (升级为 3.5 次世代模型)
+# 3. 智能抗压排队逻辑 (Gemini 3.5 次世代)
 # ==========================================
 def run_task():
-    # 锁定你有额度的最新款性能甜点卡：Gemini 3.5 Flash 和 3.0 Flash
     model_candidates = ['gemini-3.5-flash', 'gemini-3-flash']
     max_retries = 3 
     
     for model_id in model_candidates:
         for attempt in range(max_retries):
-            log(f"📡 正在激活次世代引擎 {model_id} (尝试 {attempt+1}/{max_retries})...")
+            log(f"📡 正在激活引擎 {model_id} (尝试 {attempt+1}/{max_retries})...")
             try:
                 response = client.models.generate_content(
                     model=model_id, 
@@ -102,25 +112,33 @@ def run_task():
                 
                 raw_text = response.text
                 if not raw_text:
-                    raise Exception("机房返回数据为空包")
+                    raise Exception("返回数据为空")
                 
                 # 物理清洗所有的花体字乱码
                 purified_text = unicodedata.normalize('NFKC', raw_text)
-                
                 data = json.loads(purified_text)
-                log(f"✅ 成功接通 {model_id}！获取到纯净版定量数据。")
+                
+                # 校验医学模块是否被遗漏
+                if 'medical_news' not in data or not data['medical_news']:
+                    log("⚠️ 模型漏输出了医学版块，正在触发重试...")
+                    raise Exception("医学版块缺失")
+
+                log(f"✅ 成功接通 {model_id}！数据结构完全健康。")
                 return data
                 
             except Exception as e:
                 err_msg = str(e)
-                log(f"⚠️ 遇到算力波动: {err_msg}")
+                log(f"⚠️ 算力波动或格式不全: {err_msg}")
                 if "503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg:
                     if attempt < max_retries - 1:
                         wait_time = 15 * (attempt + 1)
-                        log(f"⏳ 触发防撞墙机制，等待 {wait_time} 秒后重试...")
+                        log(f"⏳ 触发防撞墙排队机制，等待 {wait_time} 秒...")
                         time.sleep(wait_time)
                         continue
-                break # 如果不是拥堵问题，或者重试用尽，直接切下一个模型
+                elif "医学版块缺失" in err_msg:
+                    time.sleep(5)
+                    continue
+                break
                 
     return None
 
@@ -130,13 +148,14 @@ def run_task():
 def format_html(data):
     html_content = ""
     
+    # 🌐 行业风向标板块
     html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 10px;'>🌐 核心行业风向标 & 定量资金流</h3>"
     for sector in data.get('sectors_data', []):
         html_content += f"""
         <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <b style="font-size: 16px; color: #0f172a;">📊 {sector.get('name')}</b>
-                <span style="background-color: #ef4444; color: white; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;">{sector.get('gain_loss')}</span>
+                <span style="background-color: #3b82f6; color: white; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;">{sector.get('gain_loss')}</span>
             </div>
             <div style="font-size: 13.5px; color: #334155; line-height: 1.6; margin-bottom: 12px; background-color: #f8fafc; padding: 10px; border-radius: 8px;">
                 • <b>资金流向比例：</b>{sector.get('capital_flow')}<br>
@@ -144,33 +163,57 @@ def format_html(data):
                 • <b>长线筹码追踪：</b>{sector.get('accumulated_flow')}
             </div>
         """
-        
         if sector.get('news_flash'):
             html_content += "<div style='border-top: 1px dashed #e2e8f0; padding-top: 10px; margin-top: 10px; font-size: 13px; line-height: 1.7;'>"
             for news in sector.get('news_flash', []):
                 html_content += f"""
                 <div style="margin-bottom: 8px; text-align: justify;">
                     <span style="color: #64748b;">[{news.get('time_location')}]</span> 
-                    <b style="color: #1e40af;">{news.get('entity')}</b>: 
-                    {news.get('summary')} 
+                    <b style="color: #1e40af;">{news.get('entity')}</b>: {news.get('summary')} 
                     <a href="{news.get('url')}" style="color: #3b82f6; text-decoration: none; font-weight: bold;">[查看原文 ↗]</a>
                 </div>
                 """
             html_content += "</div>"
         html_content += "</div>"
 
-    html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 30px;'>📈 资产四维精读报告</h3>"
+    # 🧬 医学学术精要 (强势回归)
+    if data.get('medical_news'):
+        html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 30px;'>🧬 博士级学术前沿追踪</h3>"
+        for med in data.get('medical_news', []):
+            html_content += f"""
+            <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; padding: 18px; border-radius: 12px; margin-bottom: 15px;">
+                <div style="font-size: 14.5px; color: #065f46; margin-bottom: 8px;"><b>📚 {med.get('journal_and_time')}</b></div>
+                <div style="font-size: 13px; color: #166534; line-height: 1.6;">
+                    • <b>研究背景：</b>{med.get('background')}<br>
+                    • <b>靶点药物：</b><span style="background-color:#dcfce7; padding: 1px 4px; border-radius:3px;"><b>{med.get('drug_name')}</b></span><br>
+                    • <b>方法突破：</b>{med.get('method_breakthrough')}<br>
+                    • <b>转化价值：</b><b><u>{med.get('clinical_value')}</u></b>
+                </div>
+            </div>
+            """
+
+    # 📈 资产四维精读 (A股估值色彩系统)
+    html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 30px;'>📈 资产四维精读与估值判定</h3>"
     for stock in data.get('stock_analysis', []):
+        # 提取 AI 判断的估值颜色
+        v_color = stock.get('valuation_color', '#334155')
+        # 智能添加辅助小图标
+        icon = "🔴" if v_color == "#ef4444" else ("🟢" if v_color == "#10b981" else "🟠")
+        
         html_content += f"""
         <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 12px;">
-            <div style="font-size: 14px; margin-bottom: 6px;"><b>{stock.get('name')}</b> | <span style="color: #059669; font-weight: bold;">{stock.get('levels')}</span></div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px; align-items: center;">
+                <b style="font-size: 14.5px; color: #0f172a;">{stock.get('name')}</b> 
+                <span style="color: {v_color}; font-weight: bold; font-size: 13.5px;">{stock.get('levels')}</span>
+            </div>
             <div style="font-size: 13px; color: #475569; line-height: 1.6;">
                 <b>逻辑简述：</b>{stock.get('logic')}<br>
-                <b>操作建议：</b><u>{stock.get('action')}</u>
+                <b>操作建议：</b>{icon} <span style="color: {v_color}; font-weight: bold;"><u>{stock.get('action')}</u></span>
             </div>
         </div>
         """
 
+    # 🌸 浪漫彩蛋
     if data.get('romantic_quote'):
         html_content += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
@@ -181,12 +224,11 @@ def format_html(data):
     return html_content
 
 def send_mail(html_body):
-    log("📧 正在发送终极净化版投研内参...")
+    log("📧 正在发送终极缝合版早报...")
     msg = MIMEMultipart()
     msg['Subject'] = f"✨ {today_str} 板块量化透视 × 行业精准要闻 🎀"
     msg['From'], msg['To'] = SENDER_EMAIL, RECEIVER_EMAIL
     
-    # 全局无衬线现代字体集，彻底断绝任何客户端解析出特殊花体的路径
     final_html = f"""
     <html>
     <head><meta charset="utf-8"></head>
@@ -196,7 +238,7 @@ def send_mail(html_body):
             <p style="color: #94a3b8; font-size: 12px; margin-top: 5px; letter-spacing: 1px;">QUANTITATIVE FLOW & PRECISION NEWS</p>
         </div>
         {html_body}
-        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · Gemini 3.5 引擎驱动</p>
+        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · A股估值预警版</p>
     </body>
     </html>
     """
@@ -207,13 +249,10 @@ def send_mail(html_body):
         with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, [RECEIVER_EMAIL, CC_EMAIL], msg.as_string())
-        log("🎉 纯净版早报投递成功。")
+        log("🎉 邮件投递成功，医学没丢，红绿也对了！")
     except Exception as e:
-        log(f"❌ 邮件模块末端异常: {str(e)}")
+        log(f"❌ 邮件模块报错: {str(e)}")
 
-# ==========================================
-# 🚀 闭环入口
-# ==========================================
 if __name__ == '__main__':
     log("🎬 脚本启动 (3.5次世代主力舰版)...")
     report_data = run_task()
