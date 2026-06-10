@@ -30,40 +30,42 @@ bj_tz = timezone(timedelta(hours=8))
 today_str = datetime.now(bj_tz).strftime('%Y年%m月%d日')
 
 # ==========================================
-# 2. 核心提示词 (加入医学与A股红绿逻辑)
+# 2. 核心自检级提示词 (重构新闻池与股票逻辑)
 # ==========================================
 STOCKS = ["航发科技", "航天动力", "航发控制", "长江电力", "多氟多", "英维克", "中国能建", "中国船舶", "云南锗业"]
 SECTORS = ["人工智能", "军工装备", "电池", "小金属/贵金属", "银行", "多元金融"]
 
 PROMPT = f"""
-今天是 {today_str}。请执行最高专业等级的[定量数据投研]与[医学顶刊精读]采编任务 🎀。
+今天是 {today_str}。请执行最高专业等级的[定量数据投研]与[医学顶刊精读]任务 🎀。
 
-🚨【最高红线指令 - 严禁花体字】：
-绝对禁止使用任何数学粗体、花体、全角字符或特殊的 Unicode 变体字符（严禁输出如 𝟓, 𝟚_𝟘_𝟚_𝟚, 𝐀𝐁𝐂）。所有数字和字母必须最常规。
+🚨【防幻觉与防乱码红线】：
+1. 绝对禁止捏造不存在的 URL 链接！新闻来源改为提供“全网搜索关键词”。
+2. 绝对禁止捏造今日的精确收盘价！个股分析请基于长线逻辑、近期大宗事件、宏观景气度及宽泛的筹码结构进行推演。
+3. 严禁使用任何数学花体字或特殊 Unicode 字符。
 
 🚨【A股红绿色彩与估值学】：
-在分析个股时，必须遵循中国 A 股“红涨绿跌”的习惯，判断其估值位置并输出严格的颜色代码：
-- 看多/低位支撑/买入机会：必须输出红色代码 `#ef4444`
-- 看空/高位压力/风险提示：必须输出绿色代码 `#10b981`
-- 震荡/观望/中性：必须输出橙色代码 `#f97316`
+- 看多/低位支撑/买入机会：输出红色代码 `#ef4444`
+- 看空/高位压力/风险提示：输出绿色代码 `#10b981`
+- 震荡/观望/中性：输出橙色代码 `#f97316`
 
-### 📦 结构化 JSON 规范 (必须严格包含全部字段)：
+### 📦 结构化 JSON 规范 (必须严格按照此结构生成)：
 {{
-    "sectors_data": [
+    "sectors_quantitative": [
         {{
             "name": "板块名称",
             "gain_loss": "今日涨跌幅(%)",
-            "capital_flow": "净流入额及占该板块总成交比例(%)",
-            "volume_status": "相比昨日放量/缩量状态",
-            "accumulated_flow": "近5/20个交易日累计资金流向",
-            "news_flash": [
-                {{
-                    "time_location": "时间+地点",
-                    "entity": "发布机构(严禁模糊指代)",
-                    "summary": "硬核内容摘要",
-                    "url": "原始新闻链接"
-                }}
-            ]
+            "capital_flow": "净流入额及占成交比例",
+            "volume_status": "放量/缩量状态",
+            "accumulated_flow": "近5/20个交易日累计资金流向"
+        }}
+    ],
+    "global_news_flash": [
+        {{
+            "sector_tag": "所属板块",
+            "time_location": "时间+地点",
+            "entity": "发布机构(严禁模糊指代)",
+            "summary": "硬核内容摘要",
+            "search_keyword": "验证该新闻的精确搜索关键词(如：宁德时代 固态电池 发布会)"
         }}
     ],
     "medical_news": [
@@ -78,23 +80,23 @@ PROMPT = f"""
     "stock_analysis": [
         {{
             "name": "股票名称",
-            "logic": "核心逻辑",
-            "levels": "支撑位/压力位数字",
+            "logic": "核心宏观与筹码逻辑(不瞎编实时价格)",
             "action": "极简操作建议",
-            "valuation_color": "根据估值必须输出 #ef4444 或 #10b981 或 #f97316 之一"
+            "valuation_color": "必须是 #ef4444 或 #10b981 或 #f97316"
         }}
     ],
     "romantic_quote": "专属浪漫粉色彩蛋（绝对禁止出现金融和医学术语）"
 }}
 
-内容全量计算范围：
-板块：{', '.join(SECTORS)}
-个股：{', '.join(STOCKS)}
-（必须包含 2 篇顶级医学文献复盘）
+🚨【数据要求】：
+- 板块定量：必须涵盖这6个板块：{', '.join(SECTORS)}
+- 行业新闻池 (global_news_flash)：请进行**扩容**，从上述6个板块中全局挑选 **6 至 8 条** 真正的重磅行业突发快讯。打破平均分配，哪个板块事大就多抓！
+- 个股：{', '.join(STOCKS)}
+- 医学：必须包含 2 篇顶级医学文献复盘。
 """
 
 # ==========================================
-# 3. 智能抗压排队逻辑 (Gemini 3.5 次世代)
+# 3. 智能抗压排队逻辑
 # ==========================================
 def run_task():
     model_candidates = ['gemini-3.5-flash', 'gemini-3-flash']
@@ -114,11 +116,9 @@ def run_task():
                 if not raw_text:
                     raise Exception("返回数据为空")
                 
-                # 物理清洗所有的花体字乱码
                 purified_text = unicodedata.normalize('NFKC', raw_text)
                 data = json.loads(purified_text)
                 
-                # 校验医学模块是否被遗漏
                 if 'medical_news' not in data or not data['medical_news']:
                     log("⚠️ 模型漏输出了医学版块，正在触发重试...")
                     raise Exception("医学版块缺失")
@@ -132,7 +132,7 @@ def run_task():
                 if "503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg:
                     if attempt < max_retries - 1:
                         wait_time = 15 * (attempt + 1)
-                        log(f"⏳ 触发防撞墙排队机制，等待 {wait_time} 秒...")
+                        log(f"⏳ 触发防撞墙机制，等待 {wait_time} 秒...")
                         time.sleep(wait_time)
                         continue
                 elif "医学版块缺失" in err_msg:
@@ -148,35 +148,41 @@ def run_task():
 def format_html(data):
     html_content = ""
     
-    # 🌐 行业风向标板块
-    html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 10px;'>🌐 核心行业风向标 & 定量资金流</h3>"
-    for sector in data.get('sectors_data', []):
+    # 1. 行业风向标 (仅展示定量数据)
+    html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 10px;'>📊 核心板块定量资金追踪</h3>"
+    for sector in data.get('sectors_quantitative', []):
         html_content += f"""
-        <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <b style="font-size: 16px; color: #0f172a;">📊 {sector.get('name')}</b>
+        <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <b style="font-size: 15px; color: #0f172a;">{sector.get('name')}</b>
                 <span style="background-color: #3b82f6; color: white; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: bold;">{sector.get('gain_loss')}</span>
             </div>
-            <div style="font-size: 13.5px; color: #334155; line-height: 1.6; margin-bottom: 12px; background-color: #f8fafc; padding: 10px; border-radius: 8px;">
-                • <b>资金流向比例：</b>{sector.get('capital_flow')}<br>
-                • <b>量能博弈状态：</b>{sector.get('volume_status')}<br>
-                • <b>长线筹码追踪：</b>{sector.get('accumulated_flow')}
+            <div style="font-size: 13px; color: #475569; line-height: 1.6;">
+                • <b>资金比例：</b>{sector.get('capital_flow')} | <b>量能：</b>{sector.get('volume_status')}<br>
+                • <b>中线筹码：</b>{sector.get('accumulated_flow')}
             </div>
+        </div>
         """
-        if sector.get('news_flash'):
-            html_content += "<div style='border-top: 1px dashed #e2e8f0; padding-top: 10px; margin-top: 10px; font-size: 13px; line-height: 1.7;'>"
-            for news in sector.get('news_flash', []):
-                html_content += f"""
-                <div style="margin-bottom: 8px; text-align: justify;">
-                    <span style="color: #64748b;">[{news.get('time_location')}]</span> 
-                    <b style="color: #1e40af;">{news.get('entity')}</b>: {news.get('summary')} 
-                    <a href="{news.get('url')}" style="color: #3b82f6; text-decoration: none; font-weight: bold;">[查看原文 ↗]</a>
+
+    # 2. 全局重磅新闻池 (扩容版)
+    if data.get('global_news_flash'):
+        html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 30px;'>🌍 全球高优行业快讯池</h3>"
+        html_content += "<div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 15px;'>"
+        for idx, news in enumerate(data.get('global_news_flash', [])):
+            border_style = "border-bottom: 1px dashed #cbd5e1; padding-bottom: 12px; margin-bottom: 12px;" if idx < len(data['global_news_flash'])-1 else ""
+            html_content += f"""
+            <div style="{border_style} font-size: 13.5px; line-height: 1.7; text-align: justify;">
+                <span style="background-color: #e2e8f0; color: #334155; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 5px;">{news.get('sector_tag')}</span>
+                <span style="color: #64748b;">[{news.get('time_location')}]</span> 
+                <b style="color: #1e40af;">{news.get('entity')}</b>: {news.get('summary')} 
+                <div style="margin-top: 4px; font-size: 12px;">
+                    🔍 <span style="color: #ea580c; background-color: #fff7ed; padding: 2px 5px; border-radius: 4px; border: 1px solid #ffedd5;">建议搜索关键词：<b>{news.get('search_keyword')}</b></span>
                 </div>
-                """
-            html_content += "</div>"
+            </div>
+            """
         html_content += "</div>"
 
-    # 🧬 医学学术精要 (强势回归)
+    # 3. 医药学术精要
     if data.get('medical_news'):
         html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 30px;'>🧬 博士级学术前沿追踪</h3>"
         for med in data.get('medical_news', []):
@@ -192,28 +198,26 @@ def format_html(data):
             </div>
             """
 
-    # 📈 资产四维精读 (A股估值色彩系统)
+    # 4. 资产精读 (红绿灯版)
     html_content += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 30px;'>📈 资产四维精读与估值判定</h3>"
     for stock in data.get('stock_analysis', []):
-        # 提取 AI 判断的估值颜色
         v_color = stock.get('valuation_color', '#334155')
-        # 智能添加辅助小图标
         icon = "🔴" if v_color == "#ef4444" else ("🟢" if v_color == "#10b981" else "🟠")
         
         html_content += f"""
         <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 12px;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 6px; align-items: center;">
                 <b style="font-size: 14.5px; color: #0f172a;">{stock.get('name')}</b> 
-                <span style="color: {v_color}; font-weight: bold; font-size: 13.5px;">{stock.get('levels')}</span>
+                <span style="background-color: {v_color}15; color: {v_color}; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">估值色谱</span>
             </div>
             <div style="font-size: 13px; color: #475569; line-height: 1.6;">
-                <b>逻辑简述：</b>{stock.get('logic')}<br>
+                <b>筹码逻辑：</b>{stock.get('logic')}<br>
                 <b>操作建议：</b>{icon} <span style="color: {v_color}; font-weight: bold;"><u>{stock.get('action')}</u></span>
             </div>
         </div>
         """
 
-    # 🌸 浪漫彩蛋
+    # 5. 浪漫彩蛋
     if data.get('romantic_quote'):
         html_content += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
@@ -224,7 +228,7 @@ def format_html(data):
     return html_content
 
 def send_mail(html_body):
-    log("📧 正在发送终极缝合版早报...")
+    log("📧 正在发送无幻觉高精度内参...")
     msg = MIMEMultipart()
     msg['Subject'] = f"✨ {today_str} 板块量化透视 × 行业精准要闻 🎀"
     msg['From'], msg['To'] = SENDER_EMAIL, RECEIVER_EMAIL
@@ -238,7 +242,7 @@ def send_mail(html_body):
             <p style="color: #94a3b8; font-size: 12px; margin-top: 5px; letter-spacing: 1px;">QUANTITATIVE FLOW & PRECISION NEWS</p>
         </div>
         {html_body}
-        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · A股估值预警版</p>
+        <p style="text-align: center; color: #cbd5e1; font-size: 11px; margin-top: 40px;">&copy; 2026 Captain's Desk · 去幻觉引擎驱动</p>
     </body>
     </html>
     """
@@ -249,15 +253,18 @@ def send_mail(html_body):
         with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, [RECEIVER_EMAIL, CC_EMAIL], msg.as_string())
-        log("🎉 邮件投递成功，医学没丢，红绿也对了！")
+        log("🎉 邮件投递成功！")
     except Exception as e:
         log(f"❌ 邮件模块报错: {str(e)}")
 
+# ==========================================
+# 🚀 闭环入口
+# ==========================================
 if __name__ == '__main__':
-    log("🎬 脚本启动 (3.5次世代主力舰版)...")
+    log("🎬 脚本启动 (扩容版+去幻觉)...")
     report_data = run_task()
     if report_data:
         send_mail(format_html(report_data))
     else:
-        log("❌ 最终结论：所有模型均未能返回有效数据，任务终止。")
+        log("❌ 最终结论：未能返回有效数据，任务终止。")
         sys.exit(1)
