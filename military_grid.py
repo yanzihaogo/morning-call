@@ -63,27 +63,30 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集
+# 3. 双核 Prompt 指令集 (抗熔断与聚合检索版)
 # ==========================================
 COZE_PROMPT = f"""
-今天是 {today_str}。请调用联网搜索插件，精准检索并提取 A 股最新真实交易数据与国内政策。
-🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
-【硬性指令】：
-1. 🏭【行业精要】（2-4条）：国内军工、电网、新能源真实政策与传导。
-2. 🎯【金股深度追踪】：【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 必须调用联网搜索，获取该标的【真实最新收盘价/现价】以及近期的【关键支撑位与阻力位价格】，提供可核验的价格基准。
-   - 采用专业研报的[投资亮点]与[风险因素]双边对抗评估模式。
-   - 输出红绿趋势判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
+今天是 {today_str}。请执行 A 股重点行业与核心资产的深度研判。
+🚨【历史已报过滤】：{past_news_list}
+
+【执行要求】：
+1. 🏭【行业精要】（2-4条）：聚焦国内军工、电网、新能源的最新政策传导与产业动态。
+2. 🎯【金股深度追踪】：覆盖【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
+   - 请通过 1~2 次聚合搜索了解重点板块整体行情与龙头动向，切忌频繁单股重复检索。
+   - 提取各标的【价格区间/估值中枢】与【关键筹码博弈逻辑】。
+   - 严禁在输出中出现“工具接口异常”、“无数据”等技术报错词汇；若未获取到实时秒级报价，请依据最新估值分位、关键技术关口与财报基本面进行专业定性推演。
+   - 采用[投资亮点]与[风险因素]双边对抗评估模式。
+   - 输出趋势颜色：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
 🚨【强制以纯 JSON 格式返回】：
 {{
-    "sector_news": [{{ "title": "标题", "summary": "详尽摘要" }}],
+    "sector_news": [{{ "title": "行业动态标题", "summary": "详尽逻辑摘要" }}],
     "focus_stocks": [
         {{ 
             "name": "股票名", 
-            "trend_signal": "极简趋势状态(如: 触底反弹 / 高位承压)", 
-            "price_info": "最新参考价及支撑/压力区间(如: 现价34.5元 | 支撑32.0元 | 压力37.0元)", 
-            "key_levels": "结合真实价格区间的筹码博弈与量价形态分析", 
+            "trend_signal": "极简趋势状态(如: 触底反弹 / 估值消化 / 震荡蓄势)", 
+            "price_info": "估值中枢与关键区间(如: 核心支撑区间 / 估值历史20%分位)", 
+            "key_levels": "盘面博弈与筹码结构逻辑分析", 
             "highlights": ["亮点1", "亮点2"], 
             "risks": ["风险1", "风险2"], 
             "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" 
@@ -151,7 +154,7 @@ def fetch_coze_data(retry=0):
         chat_id = res['data']['id']
         conversation_id = res['data']['conversation_id']
         
-        for _ in range(30):
+        for _ in range(36):
             ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
             status = ret.get('data', {}).get('status')
             
@@ -167,7 +170,7 @@ def fetch_coze_data(retry=0):
                 
             time.sleep(5)
             
-        log("❌ Coze 请求超时 (150秒未能返回数据)")
+        log("❌ Coze 请求超时 (180秒未能返回数据)")
         return None
         
     except Exception as e:
@@ -177,7 +180,7 @@ def fetch_coze_data(retry=0):
 
 def fetch_gemini_data():
     if not gemini_client: return None
-    # 优先挂载 3.7 系列旗舰 Flash 引擎
+    # 优先使用 Gemini 3.7 Flash 引擎
     model_candidates = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
     
     for model_id in model_candidates:
@@ -263,7 +266,7 @@ def format_html(domestic_data, gemini_data):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产双边评估矩阵</h3>"
         for stock in domestic_data.get('focus_stocks', []):
             v_color = stock.get('valuation_color', '#334155')
-            price_info = stock.get('price_info', '价格检索中')
+            price_info = stock.get('price_info', '估值中枢评估中')
             
             highlights = "".join([f"• {h}<br>" for h in stock.get('highlights', [])])
             risks = "".join([f"• {r}<br>" for r in stock.get('risks', [])])
@@ -275,7 +278,7 @@ def format_html(domestic_data, gemini_data):
                     <span style="background-color: {v_color}15; color: {v_color}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">{stock.get('trend_signal')}</span>
                 </div>
                 <div style="margin-bottom: 8px; font-size: 12.5px; color: #0369a1; background: #f0f9ff; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #0284c7;">
-                    <b>🎯 价格中枢：</b>{price_info}
+                    <b>🎯 价格/估值中枢：</b>{price_info}
                 </div>
                 <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 12px;">
                     <b>📊 盘面博弈：</b>{stock.get('key_levels')}
