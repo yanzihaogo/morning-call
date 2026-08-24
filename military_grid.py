@@ -14,14 +14,13 @@ from datetime import datetime, timedelta, timezone
 
 def log(message):
     bj_time = datetime.now(timezone(timedelta(hours=8))).strftime('%H:%M:%S')
-    print(f"[{bj_time}] [🚀 双核调度] {message}")
+    print(f"[{bj_time}] [🚀 MoE 双核系统] {message}")
     sys.stdout.flush()
 
 # ==========================================
-# 1. 统一配置中心 (双引擎 API 密钥)
+# 1. 统一配置中心 (DeepSeek + Gemini 双擎)
 # ==========================================
-coze_token = os.getenv('COZE_API_TOKEN', '').strip()
-coze_bot_id = os.getenv('COZE_BOT_ID', '').strip()
+deepseek_api_key = os.getenv('DEEPSEEK_API_KEY', '').strip()
 gemini_api_key = os.getenv('GOOGLE_API_KEY', '').strip()
 
 smtp_server = os.getenv('SMTP_SERVER')       
@@ -38,7 +37,7 @@ today_str = now_bj.strftime('%Y年%m月%d日')
 gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
 # ==========================================
-# 2. 账本系统 (专注记录国内行业防重复)
+# 2. 账本系统 (防重复记录)
 # ==========================================
 HISTORY_FILE = "news_history.txt"
 def get_past_news():
@@ -47,9 +46,9 @@ def get_past_news():
             return f.read()
     return ""
 
-def save_new_history(coze_data):
-    if not coze_data: return
-    new_titles = [item.get('title') for item in coze_data.get('sector_news', []) if item.get('title')]
+def save_new_history(domestic_data):
+    if not domestic_data: return
+    new_titles = [item.get('title') for item in domestic_data.get('sector_news', []) if item.get('title')]
     if not new_titles: return
     
     lines = []
@@ -67,23 +66,24 @@ past_news_list = get_past_news()
 # 3. 双核 Prompt 指令集
 # ==========================================
 
-# 🇨🇳 引擎 A (Coze): 专注 A 股量价与国内政策 (绝对真实数据)
-COZE_PROMPT = f"""
+# 🇨🇳 引擎 A (DeepSeek): 专注 A 股核心逻辑与国内宏观 (严谨逻辑判定)
+DOMESTIC_PROMPT = f"""
 今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
-🚨【黑名单记录】：{past_news_list}
+🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
 【硬性指令】：
 1. 🏭【行业精要】（2-4条）：国内军工、电网、新能源真实政策与传导。
 2. 🎯【金股深度追踪】：【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 必须结合国内真实盘面数据。输出红绿估值判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
+   - 基于最新的基本面、订单和产业逻辑进行深度推演。
+   - 输出红绿估值判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
-🚨【强制 JSON 格式返回】：
+🚨【强制以纯 JSON 格式返回】：
 {{
     "sector_news": [{{ "title": "标题", "summary": "详尽摘要" }}],
-    "focus_stocks": [{{ "name": "股票名", "advice": "极简建议", "key_levels": "真实支撑/压力位", "fund_flow": "真实资金流向", "reason": "硬核盘面逻辑", "valuation_color": "估值色谱代码" }}]
+    "focus_stocks": [{{ "name": "股票名", "advice": "极简建议", "key_levels": "量价及筹码结构", "fund_flow": "资金趋势判定", "reason": "硬核基本面逻辑", "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" }}]
 }}
 """
 
-# 🌍 引擎 B (Gemini): 专注全球宏观、医学顶刊与情感彩蛋 (去幻觉)
+# 🌍 引擎 B (Gemini 3.5): 专注全球外盘、医学顶刊与情感彩蛋 (去幻觉引擎)
 GEMINI_PROMPT = f"""
 今天是 {today_str}。请执行全球前沿探索与学术提炼。
 🚨【核心指令】：
@@ -91,7 +91,7 @@ GEMINI_PROMPT = f"""
 2. 精读 2 篇顶级医学文献，必须包含[药物通用名]。
 3. 严禁使用任何花体字或特殊 Unicode 数学字符。
 
-🚨【强制 JSON 格式返回】：
+🚨【强制以纯 JSON 格式返回】：
 {{
     "global_news_flash": [
         {{
@@ -116,43 +116,46 @@ GEMINI_PROMPT = f"""
 """
 
 # ==========================================
-# 4. 双核抓取函数
+# 4. 双核调度函数
 # ==========================================
-def fetch_coze_data(retry=0):
-    if retry > 1: return None
-    log(f"🇨🇳 启动国内引擎 Coze 抓取 A 股数据 (尝试 {retry+1})...")
-    headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
-    payload = {
-        "bot_id": coze_bot_id, "user_id": "quant_master", 
-        "additional_messages": [{"role": "user", "content": COZE_PROMPT, "content_type": "text"}]
+def fetch_domestic_data(retry=0):
+    if not deepseek_api_key:
+        log("⚠️ 未检测到 DEEPSEEK_API_KEY，跳过国内数据拉取。")
+        return None
+    if retry > 2: return None
+    
+    log(f"🇨🇳 启动国内主力引擎 DeepSeek (尝试 {retry+1})...")
+    headers = {
+        'Authorization': f'Bearer {deepseek_api_key}',
+        'Content-Type': 'application/json'
     }
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": DOMESTIC_PROMPT}],
+        "response_format": {"type": "json_object"} # 强制输出 JSON 格式
+    }
+    
     try:
-        response = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload, timeout=90)
-        res = response.json()
-        if res.get('code') != 0: return fetch_coze_data(retry + 1)
+        response = requests.post('https://api.deepseek.com/chat/completions', headers=headers, json=payload, timeout=60)
+        res_json = response.json()
         
-        chat_id, conversation_id = res['data']['id'], res['data']['conversation_id']
-        for _ in range(30):
-            ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
-            status = ret.get('data', {}).get('status')
-            if status == 'completed':
-                msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
-                content = next((m.get('content') for m in msgs.get('data', []) if m.get('type') == 'answer'), "")
-                return json.loads(re.search(r'\{.*\}', content, re.DOTALL).group())
-            elif status in ['failed', 'canceled']:
-                time.sleep(10)
-                return fetch_coze_data(retry + 1)
+        if 'choices' in res_json:
+            content = res_json['choices'][0]['message']['content']
+            return json.loads(content)
+        else:
             time.sleep(5)
-    except:
-        return fetch_coze_data(retry + 1)
+            return fetch_domestic_data(retry + 1)
+    except Exception as e:
+        log(f"❌ DeepSeek 报错: {str(e)}")
+        time.sleep(5)
+        return fetch_domestic_data(retry + 1)
 
 def fetch_gemini_data():
     if not gemini_client: return None
     model_candidates = ['gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
-    max_retries = 3
     
     for model_id in model_candidates:
-        for attempt in range(max_retries):
+        for attempt in range(3):
             log(f"🌍 正在激活国际引擎 {model_id} (尝试 {attempt+1})...")
             try:
                 response = gemini_client.models.generate_content(
@@ -177,8 +180,8 @@ def fetch_gemini_data():
 # ==========================================
 # 5. 跨模态数据缝合与 HTML 渲染
 # ==========================================
-def format_html(coze_data, gemini_data):
-    coze_data = coze_data or {}
+def format_html(domestic_data, gemini_data):
+    domestic_data = domestic_data or {}
     gemini_data = gemini_data or {}
     
     html = f"""
@@ -211,10 +214,10 @@ def format_html(coze_data, gemini_data):
             """
         html += "</div>"
 
-    # 🇨🇳 行业政策精要 (Coze 提供)
-    if coze_data.get('sector_news'):
-        html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px;'>🏭 国内重点行业政策传导</h3>"
-        for item in coze_data.get('sector_news', []):
+    # 🇨🇳 行业政策精要 (DeepSeek 提供)
+    if domestic_data.get('sector_news'):
+        html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px;'>🏭 国内重点行业逻辑与政策传导</h3>"
+        for item in domestic_data.get('sector_news', []):
             html += f"<div style='margin-bottom: 15px;'><h4 style='margin: 0 0 4px 0; font-size: 14.5px;'>▪ {item.get('title')}</h4><p style='margin:0; font-size: 13px; color: #475569; line-height: 1.6;'>{item.get('summary')}</p></div>"
 
     # 🧬 医学学术精要 (Gemini 提供)
@@ -233,10 +236,10 @@ def format_html(coze_data, gemini_data):
             </div>
             """
 
-    # 🎯 核心资产精读 (Coze 提供)
-    if coze_data.get('focus_stocks'):
+    # 🎯 核心资产精读 (DeepSeek 提供)
+    if domestic_data.get('focus_stocks'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产四维精读 (红绿灯版)</h3>"
-        for stock in coze_data.get('focus_stocks', []):
+        for stock in domestic_data.get('focus_stocks', []):
             v_color = stock.get('valuation_color', '#334155')
             icon = "🔴" if "#ef4444" in v_color else ("🟢" if "#10b981" in v_color else "🟠")
             
@@ -264,7 +267,7 @@ def format_html(coze_data, gemini_data):
         
     html += """
             </div>
-            <p style="text-align: center; color: #cbd5e1; font-size: 11px; padding-bottom: 20px;">&copy; 2026 SJTU Captain's Desk · MoE 双核引擎驱动</p>
+            <p style="text-align: center; color: #cbd5e1; font-size: 11px; padding-bottom: 20px;">&copy; 2026 SJTU Captain's Desk · DeepSeek × Gemini 双核驱动</p>
         </div>
     </body>
     </html>
@@ -290,25 +293,24 @@ def send_email(html_body):
 # 🚀 主控并发调度系统
 # ==========================================
 def main():
-    log("🎬 启动 MoE 混合专家模型调度枢纽...")
+    log("🎬 启动 DeepSeek + Gemini 混合专家模型调度枢纽...")
     
-    # 开启两个线程，同时去跑国内的 Coze 和国际的 Gemini
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_coze = executor.submit(fetch_coze_data)
+        future_domestic = executor.submit(fetch_domestic_data)
         future_gemini = executor.submit(fetch_gemini_data)
         
-        coze_data = future_coze.result()
+        domestic_data = future_domestic.result()
         gemini_data = future_gemini.result()
         
-    if not coze_data and not gemini_data:
+    if not domestic_data and not gemini_data:
         log("❌ 国内与国际引擎均响应失败，任务终止。")
         sys.exit(1)
         
-    if not coze_data: log("⚠️ Coze A 股数据拉取失败，本期将仅包含全球新闻与医学解析。")
+    if not domestic_data: log("⚠️ DeepSeek A 股数据拉取失败，本期将仅包含全球新闻与医学解析。")
     if not gemini_data: log("⚠️ Gemini 国际数据拉取失败，本期将仅包含 A 股信息。")
 
-    send_email(format_html(coze_data, gemini_data))
-    save_new_history(coze_data)
+    send_email(format_html(domestic_data, gemini_data))
+    save_new_history(domestic_data)
 
 if __name__ == '__main__':
     main()
