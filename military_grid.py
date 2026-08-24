@@ -62,7 +62,7 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集
+# 3. 双核 Prompt 指令集 (强力去幻觉版)
 # ==========================================
 DOMESTIC_PROMPT = f"""
 今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
@@ -71,7 +71,8 @@ DOMESTIC_PROMPT = f"""
 1. 🏭【行业精要】（2-4条）：国内军工、电网、新能源真实政策与传导。
 2. 🎯【金股深度追踪】：【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
    - 采用专业研报的[亮点]与[风险]双边评估模式。
-   - 输出红绿估值判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
+   - 🚨🚨🚨【致命红线】：你没有任何实时行情数据接口！绝对、绝对禁止编造任何具体的股价数字（如“在15元附近”、“突破17元”）。一旦输出具体金额即视为严重事故！只能做定性的产业逻辑与宽泛的筹码博弈分析（如“底部筹码吸筹”、“面临前期套牢盘压力”）。
+   - 输出红绿趋势判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
 🚨【强制以纯 JSON 格式返回】：
 {{
@@ -80,7 +81,7 @@ DOMESTIC_PROMPT = f"""
         {{ 
             "name": "股票名", 
             "trend_signal": "极简趋势状态(如: 触底反弹 / 高位承压)", 
-            "key_levels": "量价及筹码结构分析", 
+            "key_levels": "产业基本面与宏观博弈逻辑(绝对禁止出现任何股价数字！)", 
             "highlights": ["亮点1", "亮点2"], 
             "risks": ["风险1", "风险2"], 
             "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" 
@@ -253,7 +254,6 @@ def format_html(domestic_data, gemini_data):
         for stock in domestic_data.get('focus_stocks', []):
             v_color = stock.get('valuation_color', '#334155')
             
-            # 处理亮点和风险的列表
             highlights = "".join([f"• {h}<br>" for h in stock.get('highlights', [])])
             risks = "".join([f"• {r}<br>" for r in stock.get('risks', [])])
             
@@ -264,7 +264,7 @@ def format_html(domestic_data, gemini_data):
                     <span style="background-color: {v_color}15; color: {v_color}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">{stock.get('trend_signal')}</span>
                 </div>
                 <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 12px;">
-                    <b>📊 盘面逻辑：</b>{stock.get('key_levels')}
+                    <b>📊 产业逻辑：</b>{stock.get('key_levels')}
                 </div>
                 
                 <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12.5px; border-top: 1px dashed #cbd5e1; padding-top: 12px;">
