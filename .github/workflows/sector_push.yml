@@ -36,7 +36,7 @@ jobs:
 
       # 4. 执行采编与推送脚本
       - name: Run Gemini Scraper
-        env:
+       env:
         # 以下变量需在 GitHub 仓库的 Settings -> Secrets and variables -> Actions 中配置
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
