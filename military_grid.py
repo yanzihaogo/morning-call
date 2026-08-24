@@ -18,9 +18,10 @@ def log(message):
     sys.stdout.flush()
 
 # ==========================================
-# 1. 统一配置中心 (DeepSeek + Gemini 双擎)
+# 1. 统一配置中心 (Coze + Gemini 双擎)
 # ==========================================
-deepseek_api_key = os.getenv('DEEPSEEK_API_KEY', '').strip()
+coze_token = os.getenv('COZE_API_TOKEN', '').strip()
+coze_bot_id = os.getenv('COZE_BOT_ID', '').strip()
 gemini_api_key = os.getenv('GOOGLE_API_KEY', '').strip()
 
 smtp_server = os.getenv('SMTP_SERVER')       
@@ -62,9 +63,9 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集 (强力去幻觉版)
+# 3. 双核 Prompt 指令集
 # ==========================================
-DOMESTIC_PROMPT = f"""
+COZE_PROMPT = f"""
 今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
 🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
 【硬性指令】：
@@ -125,46 +126,55 @@ GEMINI_PROMPT = f"""
 # ==========================================
 # 4. 双核调度函数
 # ==========================================
-def fetch_domestic_data(retry=0):
-    if not deepseek_api_key:
-        log("⚠️ 未检测到 DEEPSEEK_API_KEY，跳过国内数据拉取。请检查 GitHub Secrets 配置！")
+def fetch_coze_data(retry=0):
+    if not coze_token or not coze_bot_id:
+        log("⚠️ 未检测到 COZE_API_TOKEN 或 COZE_BOT_ID，跳过国内数据拉取。请检查 GitHub Secrets 配置！")
         return None
     if retry > 2: return None
     
-    log(f"🇨🇳 启动国内主力引擎 DeepSeek (尝试 {retry+1})...")
-    headers = {
-        'Authorization': f'Bearer {deepseek_api_key}',
-        'Content-Type': 'application/json'
-    }
+    log(f"🇨🇳 启动国内主力引擎 Coze (尝试 {retry+1})...")
+    headers = {'Authorization': f'Bearer {coze_token}', 'Content-Type': 'application/json'}
     payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": DOMESTIC_PROMPT}],
-        "response_format": {"type": "json_object"} 
+        "bot_id": coze_bot_id, "user_id": "quant_master", 
+        "additional_messages": [{"role": "user", "content": COZE_PROMPT, "content_type": "text"}]
     }
     
     try:
-        response = requests.post('https://api.deepseek.com/chat/completions', headers=headers, json=payload, timeout=60)
-        
-        if response.status_code != 200:
-            log(f"❌ DeepSeek 拦截报错 (HTTP {response.status_code}): {response.text}")
+        response = requests.post('https://api.coze.cn/v3/chat', headers=headers, json=payload, timeout=60)
+        res = response.json()
+        if res.get('code') != 0: 
+            log(f"❌ Coze 发起对话失败: {res}")
             time.sleep(5)
-            return fetch_domestic_data(retry + 1)
-            
-        res_json = response.json()
+            return fetch_coze_data(retry + 1)
         
-        if 'choices' in res_json:
-            content = res_json['choices'][0]['message']['content']
-            clean_content = re.sub(r'```json|```', '', content).strip()
-            return json.loads(clean_content)
-        else:
-            log(f"⚠️ DeepSeek 返回结构异常: {res_json}")
-            time.sleep(5)
-            return fetch_domestic_data(retry + 1)
+        chat_id = res['data']['id']
+        conversation_id = res['data']['conversation_id']
+        
+        # 轮询获取 Coze 结果
+        for _ in range(30):
+            ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+            status = ret.get('data', {}).get('status')
             
+            if status == 'completed':
+                msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
+                content = next((m.get('content') for m in msgs.get('data', []) if m.get('type') == 'answer'), "")
+                # 清洗 markdown 格式符号
+                clean_content = re.sub(r'```json|```', '', content).strip()
+                return json.loads(clean_content)
+            elif status in ['failed', 'canceled']:
+                log(f"❌ Coze 状态异常终止: {status}")
+                time.sleep(5)
+                return fetch_coze_data(retry + 1)
+                
+            time.sleep(5) # 继续等待
+            
+        log("❌ Coze 请求超时 (150秒未能返回数据)")
+        return None
+        
     except Exception as e:
-        log(f"❌ DeepSeek 网络或解析异常: {str(e)}")
+        log(f"❌ Coze 网络或解析异常: {str(e)}")
         time.sleep(5)
-        return fetch_domestic_data(retry + 1)
+        return fetch_coze_data(retry + 1)
 
 def fetch_gemini_data():
     if not gemini_client: return None
@@ -174,6 +184,7 @@ def fetch_gemini_data():
         for attempt in range(3):
             log(f"🌍 正在激活国际引擎 {model_id} (尝试 {attempt+1})...")
             try:
+                # 使用 Chat session 修复 AFC 警告
                 chat = gemini_client.chats.create(
                     model=model_id,
                     config={"response_mime_type": "application/json"}
@@ -292,7 +303,7 @@ def format_html(domestic_data, gemini_data):
         
     html += """
             </div>
-            <p style="text-align: center; color: #cbd5e1; font-size: 11px; padding-bottom: 20px;">&copy; 2026 SJTU Captain's Desk · DeepSeek × Gemini 双核驱动</p>
+            <p style="text-align: center; color: #cbd5e1; font-size: 11px; padding-bottom: 20px;">&copy; 2026 SJTU Captain's Desk · Coze × Gemini 双核驱动</p>
         </div>
     </body>
     </html>
@@ -315,10 +326,10 @@ def send_email(html_body):
         log(f"❌ 邮件模块报错: {str(e)}")
 
 def main():
-    log("🎬 启动 DeepSeek + Gemini 混合专家模型调度枢纽...")
+    log("🎬 启动 Coze + Gemini 混合专家模型调度枢纽...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_domestic = executor.submit(fetch_domestic_data)
+        future_domestic = executor.submit(fetch_coze_data)
         future_gemini = executor.submit(fetch_gemini_data)
         
         domestic_data = future_domestic.result()
@@ -328,7 +339,7 @@ def main():
         log("❌ 国内与国际引擎均响应失败，任务终止。")
         sys.exit(1)
         
-    if not domestic_data: log("⚠️ DeepSeek A 股数据拉取失败，本期将仅包含全球新闻与医学解析。")
+    if not domestic_data: log("⚠️ Coze A 股数据拉取失败，本期将仅包含全球新闻与医学解析。")
     if not gemini_data: log("⚠️ Gemini 国际数据拉取失败，本期将仅包含 A 股信息。")
 
     send_email(format_html(domestic_data, gemini_data))
