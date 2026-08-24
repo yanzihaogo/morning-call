@@ -66,13 +66,13 @@ past_news_list = get_past_news()
 # 3. 双核 Prompt 指令集
 # ==========================================
 COZE_PROMPT = f"""
-今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
+今天是 {today_str}。请调用联网搜索插件，精准检索并提取 A 股最新真实交易数据与国内政策。
 🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
 【硬性指令】：
 1. 🏭【行业精要】（2-4条）：国内军工、电网、新能源真实政策与传导。
 2. 🎯【金股深度追踪】：【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 采用专业研报的[亮点]与[风险]双边评估模式。
-   - 🚨🚨🚨【致命红线】：你没有任何实时行情数据接口！绝对、绝对禁止编造任何具体的股价数字（如“在15元附近”、“突破17元”）。一旦输出具体金额即视为严重事故！只能做定性的产业逻辑与宽泛的筹码博弈分析（如“底部筹码吸筹”、“面临前期套牢盘压力”）。
+   - 必须调用联网搜索，获取该标的【真实最新收盘价/现价】以及近期的【关键支撑位与阻力位价格】，提供可核验的价格基准。
+   - 采用专业研报的[投资亮点]与[风险因素]双边对抗评估模式。
    - 输出红绿趋势判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
 🚨【强制以纯 JSON 格式返回】：
@@ -82,7 +82,8 @@ COZE_PROMPT = f"""
         {{ 
             "name": "股票名", 
             "trend_signal": "极简趋势状态(如: 触底反弹 / 高位承压)", 
-            "key_levels": "产业基本面与宏观博弈逻辑(绝对禁止出现任何股价数字！)", 
+            "price_info": "最新参考价及支撑/压力区间(如: 现价34.5元 | 支撑32.0元 | 压力37.0元)", 
+            "key_levels": "结合真实价格区间的筹码博弈与量价形态分析", 
             "highlights": ["亮点1", "亮点2"], 
             "risks": ["风险1", "风险2"], 
             "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" 
@@ -176,7 +177,8 @@ def fetch_coze_data(retry=0):
 
 def fetch_gemini_data():
     if not gemini_client: return None
-    model_candidates = ['gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
+    # 优先挂载 3.7 系列旗舰 Flash 引擎
+    model_candidates = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
     
     for model_id in model_candidates:
         for attempt in range(3):
@@ -261,6 +263,7 @@ def format_html(domestic_data, gemini_data):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产双边评估矩阵</h3>"
         for stock in domestic_data.get('focus_stocks', []):
             v_color = stock.get('valuation_color', '#334155')
+            price_info = stock.get('price_info', '价格检索中')
             
             highlights = "".join([f"• {h}<br>" for h in stock.get('highlights', [])])
             risks = "".join([f"• {r}<br>" for r in stock.get('risks', [])])
@@ -271,8 +274,11 @@ def format_html(domestic_data, gemini_data):
                     <b style="font-size: 15px; color: #0f172a;">{stock.get('name')}</b> 
                     <span style="background-color: {v_color}15; color: {v_color}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">{stock.get('trend_signal')}</span>
                 </div>
+                <div style="margin-bottom: 8px; font-size: 12.5px; color: #0369a1; background: #f0f9ff; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #0284c7;">
+                    <b>🎯 价格中枢：</b>{price_info}
+                </div>
                 <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 12px;">
-                    <b>📊 产业逻辑：</b>{stock.get('key_levels')}
+                    <b>📊 盘面博弈：</b>{stock.get('key_levels')}
                 </div>
                 
                 <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12.5px; border-top: 1px dashed #cbd5e1; padding-top: 12px;">
