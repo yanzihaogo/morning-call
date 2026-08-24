@@ -66,7 +66,7 @@ past_news_list = get_past_news()
 # 3. 双核 Prompt 指令集
 # ==========================================
 
-# 🇨🇳 引擎 A (DeepSeek): 专注 A 股核心逻辑与国内宏观 (严谨逻辑判定)
+# 🇨🇳 引擎 A (DeepSeek): 专注 A 股核心逻辑与国内宏观
 DOMESTIC_PROMPT = f"""
 今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
 🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
@@ -83,7 +83,7 @@ DOMESTIC_PROMPT = f"""
 }}
 """
 
-# 🌍 引擎 B (Gemini 3.5): 专注全球外盘、医学顶刊与情感彩蛋 (去幻觉引擎)
+# 🌍 引擎 B (Gemini 3.5): 专注全球外盘、医学顶刊与情感彩蛋
 GEMINI_PROMPT = f"""
 今天是 {today_str}。请执行全球前沿探索与学术提炼。
 🚨【核心指令】：
@@ -116,7 +116,7 @@ GEMINI_PROMPT = f"""
 """
 
 # ==========================================
-# 4. 双核调度函数
+# 4. 双核调度函数 (带强力除错与 Markdown 清洗)
 # ==========================================
 def fetch_domestic_data(retry=0):
     if not deepseek_api_key:
@@ -132,21 +132,32 @@ def fetch_domestic_data(retry=0):
     payload = {
         "model": "deepseek-chat",
         "messages": [{"role": "user", "content": DOMESTIC_PROMPT}],
-        "response_format": {"type": "json_object"} # 强制输出 JSON 格式
+        "response_format": {"type": "json_object"} 
     }
     
     try:
         response = requests.post('https://api.deepseek.com/chat/completions', headers=headers, json=payload, timeout=60)
+        
+        # 🚨 强力除错：打印非 200 状态码原因
+        if response.status_code != 200:
+            log(f"❌ DeepSeek 拦截报错 (HTTP {response.status_code}): {response.text}")
+            time.sleep(5)
+            return fetch_domestic_data(retry + 1)
+            
         res_json = response.json()
         
         if 'choices' in res_json:
             content = res_json['choices'][0]['message']['content']
-            return json.loads(content)
+            # 物理清除可能残留的 markdown json 标记
+            clean_content = re.sub(r'```json|```', '', content).strip()
+            return json.loads(clean_content)
         else:
+            log(f"⚠️ DeepSeek 返回结构异常: {res_json}")
             time.sleep(5)
             return fetch_domestic_data(retry + 1)
+            
     except Exception as e:
-        log(f"❌ DeepSeek 报错: {str(e)}")
+        log(f"❌ DeepSeek 网络或解析异常: {str(e)}")
         time.sleep(5)
         return fetch_domestic_data(retry + 1)
 
@@ -197,7 +208,7 @@ def format_html(domestic_data, gemini_data):
             <div style="padding: 0 20px 20px 20px;">
     """
     
-    # 🌍 全局高优快讯 (Gemini 提供)
+    # 🌍 全局高优快讯
     if gemini_data.get('global_news_flash'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px;'>🌍 全球高优行业快讯池</h3>"
         html += "<div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px;'>"
@@ -214,13 +225,13 @@ def format_html(domestic_data, gemini_data):
             """
         html += "</div>"
 
-    # 🇨🇳 行业政策精要 (DeepSeek 提供)
+    # 🇨🇳 行业政策精要
     if domestic_data.get('sector_news'):
         html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px;'>🏭 国内重点行业逻辑与政策传导</h3>"
         for item in domestic_data.get('sector_news', []):
             html += f"<div style='margin-bottom: 15px;'><h4 style='margin: 0 0 4px 0; font-size: 14.5px;'>▪ {item.get('title')}</h4><p style='margin:0; font-size: 13px; color: #475569; line-height: 1.6;'>{item.get('summary')}</p></div>"
 
-    # 🧬 医学学术精要 (Gemini 提供)
+    # 🧬 医学学术精要
     if gemini_data.get('medical_news'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 25px;'>🧬 博士级学术前沿追踪</h3>"
         for med in gemini_data.get('medical_news', []):
@@ -236,7 +247,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
-    # 🎯 核心资产精读 (DeepSeek 提供)
+    # 🎯 核心资产精读
     if domestic_data.get('focus_stocks'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产四维精读 (红绿灯版)</h3>"
         for stock in domestic_data.get('focus_stocks', []):
@@ -257,7 +268,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
-    # 🌸 浪漫彩蛋 (Gemini 提供)
+    # 🌸 浪漫彩蛋
     if gemini_data.get('romantic_quote'):
         html += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
