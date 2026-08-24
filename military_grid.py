@@ -119,7 +119,7 @@ GEMINI_PROMPT = f"""
             "clinical_value": "临床价值"
         }}
     ],
-    "romantic_quote": "用航海的意象，写给医学科研女友的早安情话（50字内，不提具体身份，只要那种乘风破浪与守护生命交相辉映的浪漫意境）"
+    "romantic_quote": "写给女朋友的早安暖心短句或浪漫情话（50字以内。不限制任何主题，风格自由、清新、诗意、温柔或风趣皆可，重点是读来让人眼前一亮、晨起拥有明媚好心情）"
 }}
 """
 
@@ -150,7 +150,6 @@ def fetch_coze_data(retry=0):
         chat_id = res['data']['id']
         conversation_id = res['data']['conversation_id']
         
-        # 轮询获取 Coze 结果
         for _ in range(30):
             ret = requests.get(f'https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
             status = ret.get('data', {}).get('status')
@@ -158,7 +157,6 @@ def fetch_coze_data(retry=0):
             if status == 'completed':
                 msgs = requests.get(f'https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}', headers=headers).json()
                 content = next((m.get('content') for m in msgs.get('data', []) if m.get('type') == 'answer'), "")
-                # 清洗 markdown 格式符号
                 clean_content = re.sub(r'```json|```', '', content).strip()
                 return json.loads(clean_content)
             elif status in ['failed', 'canceled']:
@@ -166,7 +164,7 @@ def fetch_coze_data(retry=0):
                 time.sleep(5)
                 return fetch_coze_data(retry + 1)
                 
-            time.sleep(5) # 继续等待
+            time.sleep(5)
             
         log("❌ Coze 请求超时 (150秒未能返回数据)")
         return None
@@ -184,7 +182,6 @@ def fetch_gemini_data():
         for attempt in range(3):
             log(f"🌍 正在激活国际引擎 {model_id} (尝试 {attempt+1})...")
             try:
-                # 使用 Chat session 修复 AFC 警告
                 chat = gemini_client.chats.create(
                     model=model_id,
                     config={"response_mime_type": "application/json"}
@@ -214,7 +211,7 @@ def format_html(domestic_data, gemini_data):
     <!DOCTYPE html>
     <html>
     <head><meta charset="utf-8"></head>
-    <body style="margin: 0; padding: 15px; font-family: -apple-system, sans-serif; background-color: #f8fafc; color: #334155;">
+    <body style="margin: 0; padding: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc; color: #334155;">
         <div style="max-width: 750px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.01);">
             <div style="text-align: center; margin-bottom: 25px; padding: 20px; border-bottom: 1px solid #e2e8f0;">
                 <h2 style="color: #1e40af; margin: 0; font-size: 22px;">🌤️ Daily Financial Intelligence</h2>
