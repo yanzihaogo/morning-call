@@ -33,7 +33,6 @@ tz_bj = timezone(timedelta(hours=8))
 now_bj = datetime.now(tz_bj)
 today_str = now_bj.strftime('%Y年%m月%d日')
 
-# 初始化 Gemini 客户端
 gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 
 # ==========================================
@@ -65,30 +64,36 @@ past_news_list = get_past_news()
 # ==========================================
 # 3. 双核 Prompt 指令集
 # ==========================================
-
-# 🇨🇳 引擎 A (DeepSeek): 专注 A 股核心逻辑与国内宏观
 DOMESTIC_PROMPT = f"""
 今天是 {today_str}。请执行 A 股实盘与国内政策精准提取。
 🚨【黑名单记录】：{past_news_list} (避开这些已报道过的新闻)
 【硬性指令】：
 1. 🏭【行业精要】（2-4条）：国内军工、电网、新能源真实政策与传导。
 2. 🎯【金股深度追踪】：【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 基于最新的基本面、订单和产业逻辑进行深度推演。
+   - 采用专业研报的[亮点]与[风险]双边评估模式。
    - 输出红绿估值判断：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
 🚨【强制以纯 JSON 格式返回】：
 {{
     "sector_news": [{{ "title": "标题", "summary": "详尽摘要" }}],
-    "focus_stocks": [{{ "name": "股票名", "advice": "极简建议", "key_levels": "量价及筹码结构", "fund_flow": "资金趋势判定", "reason": "硬核基本面逻辑", "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" }}]
+    "focus_stocks": [
+        {{ 
+            "name": "股票名", 
+            "trend_signal": "极简趋势状态(如: 触底反弹 / 高位承压)", 
+            "key_levels": "量价及筹码结构分析", 
+            "highlights": ["亮点1", "亮点2"], 
+            "risks": ["风险1", "风险2"], 
+            "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" 
+        }}
+    ]
 }}
 """
 
-# 🌍 引擎 B (Gemini 3.5): 专注全球外盘、医学顶刊与情感彩蛋
 GEMINI_PROMPT = f"""
 今天是 {today_str}。请执行全球前沿探索与学术提炼。
 🚨【核心指令】：
 1. 全局抓取 6-8 条外盘宏观或前沿科技快讯，严禁捏造URL，必须提供搜索关键词。
-2. 精读 2 篇顶级医学文献，必须包含[药物通用名]。
+2. 精读 2 篇顶级医学文献，标题必须是论文项目名称，并在所有专有名词和药物后用括号附上英语原文。
 3. 严禁使用任何花体字或特殊 Unicode 数学字符。
 
 🚨【强制以纯 JSON 格式返回】：
@@ -104,10 +109,11 @@ GEMINI_PROMPT = f"""
     ],
     "medical_news": [
         {{
-            "journal_and_time": "期刊名与时间",
-            "drug_name": "靶向药物通用名",
-            "background": "痛点",
-            "method_breakthrough": "核心技术与突破数据",
+            "project_title": "研究项目或论文名称 (English Title)",
+            "journal_and_time": "期刊名与发表时间",
+            "drug_name": "靶向药物通用名 (English Name)",
+            "background": "痛点(专有名词需带英文)",
+            "method_breakthrough": "核心技术与突破数据(带英文原文)",
             "clinical_value": "临床价值"
         }}
     ],
@@ -116,11 +122,11 @@ GEMINI_PROMPT = f"""
 """
 
 # ==========================================
-# 4. 双核调度函数 (带强力除错与 Markdown 清洗)
+# 4. 双核调度函数
 # ==========================================
 def fetch_domestic_data(retry=0):
     if not deepseek_api_key:
-        log("⚠️ 未检测到 DEEPSEEK_API_KEY，跳过国内数据拉取。")
+        log("⚠️ 未检测到 DEEPSEEK_API_KEY，跳过国内数据拉取。请检查 GitHub Secrets 配置！")
         return None
     if retry > 2: return None
     
@@ -138,7 +144,6 @@ def fetch_domestic_data(retry=0):
     try:
         response = requests.post('https://api.deepseek.com/chat/completions', headers=headers, json=payload, timeout=60)
         
-        # 🚨 强力除错：打印非 200 状态码原因
         if response.status_code != 200:
             log(f"❌ DeepSeek 拦截报错 (HTTP {response.status_code}): {response.text}")
             time.sleep(5)
@@ -148,7 +153,6 @@ def fetch_domestic_data(retry=0):
         
         if 'choices' in res_json:
             content = res_json['choices'][0]['message']['content']
-            # 物理清除可能残留的 markdown json 标记
             clean_content = re.sub(r'```json|```', '', content).strip()
             return json.loads(clean_content)
         else:
@@ -169,15 +173,14 @@ def fetch_gemini_data():
         for attempt in range(3):
             log(f"🌍 正在激活国际引擎 {model_id} (尝试 {attempt+1})...")
             try:
-                response = gemini_client.models.generate_content(
-                    model=model_id, 
-                    contents=GEMINI_PROMPT,
+                chat = gemini_client.chats.create(
+                    model=model_id,
                     config={"response_mime_type": "application/json"}
                 )
+                response = chat.send_message(GEMINI_PROMPT)
                 raw_text = response.text
                 if not raw_text: raise Exception("空数据")
                 
-                # 物理清洗花体字
                 purified_text = unicodedata.normalize('NFKC', raw_text)
                 return json.loads(purified_text)
             except Exception as e:
@@ -189,7 +192,7 @@ def fetch_gemini_data():
     return None
 
 # ==========================================
-# 5. 跨模态数据缝合与 HTML 渲染
+# 5. HTML 渲染与发送
 # ==========================================
 def format_html(domestic_data, gemini_data):
     domestic_data = domestic_data or {}
@@ -208,7 +211,6 @@ def format_html(domestic_data, gemini_data):
             <div style="padding: 0 20px 20px 20px;">
     """
     
-    # 🌍 全局高优快讯
     if gemini_data.get('global_news_flash'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px;'>🌍 全球高优行业快讯池</h3>"
         html += "<div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px;'>"
@@ -225,19 +227,18 @@ def format_html(domestic_data, gemini_data):
             """
         html += "</div>"
 
-    # 🇨🇳 行业政策精要
     if domestic_data.get('sector_news'):
         html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px;'>🏭 国内重点行业逻辑与政策传导</h3>"
         for item in domestic_data.get('sector_news', []):
             html += f"<div style='margin-bottom: 15px;'><h4 style='margin: 0 0 4px 0; font-size: 14.5px;'>▪ {item.get('title')}</h4><p style='margin:0; font-size: 13px; color: #475569; line-height: 1.6;'>{item.get('summary')}</p></div>"
 
-    # 🧬 医学学术精要
     if gemini_data.get('medical_news'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 25px;'>🧬 博士级学术前沿追踪</h3>"
         for med in gemini_data.get('medical_news', []):
             html += f"""
             <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; padding: 18px; border-radius: 12px; margin-bottom: 15px;">
-                <div style="font-size: 14.5px; color: #065f46; margin-bottom: 8px;"><b>📚 {med.get('journal_and_time')}</b></div>
+                <div style="font-size: 15px; color: #065f46; margin-bottom: 6px; font-weight: bold;">🔬 {med.get('project_title')}</div>
+                <div style="font-size: 12.5px; color: #059669; margin-bottom: 10px; border-bottom: 1px dashed #bbf7d0; padding-bottom: 8px;">📖 {med.get('journal_and_time')}</div>
                 <div style="font-size: 13px; color: #166534; line-height: 1.6;">
                     • <b>研究背景：</b>{med.get('background')}<br>
                     • <b>靶点药物：</b><span style="background-color:#dcfce7; padding: 1px 4px; border-radius:3px;"><b>{med.get('drug_name')}</b></span><br>
@@ -247,28 +248,41 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
-    # 🎯 核心资产精读
     if domestic_data.get('focus_stocks'):
-        html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产四维精读 (红绿灯版)</h3>"
+        html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产双边评估矩阵</h3>"
         for stock in domestic_data.get('focus_stocks', []):
             v_color = stock.get('valuation_color', '#334155')
-            icon = "🔴" if "#ef4444" in v_color else ("🟢" if "#10b981" in v_color else "🟠")
+            
+            # 处理亮点和风险的列表
+            highlights = "".join([f"• {h}<br>" for h in stock.get('highlights', [])])
+            risks = "".join([f"• {r}<br>" for r in stock.get('risks', [])])
             
             html += f"""
-            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 12px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; align-items: center;">
-                    <b style="font-size: 14.5px; color: #0f172a;">{stock.get('name')}</b> 
-                    <span style="background-color: {v_color}15; color: {v_color}; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">估值色谱</span>
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center;">
+                    <b style="font-size: 15px; color: #0f172a;">{stock.get('name')}</b> 
+                    <span style="background-color: {v_color}15; color: {v_color}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">{stock.get('trend_signal')}</span>
                 </div>
-                <div style="font-size: 13px; color: #475569; line-height: 1.6;">
-                    <b>量价/资金：</b>{stock.get('key_levels')} | {stock.get('fund_flow')}<br>
-                    <b>盘面逻辑：</b>{stock.get('reason')}<br>
-                    <b>操作建议：</b>{icon} <span style="color: {v_color}; font-weight: bold;"><u>{stock.get('advice')}</u></span>
+                <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 12px;">
+                    <b>📊 盘面逻辑：</b>{stock.get('key_levels')}
                 </div>
+                
+                <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12.5px; border-top: 1px dashed #cbd5e1; padding-top: 12px;">
+                    <tr>
+                        <td width="48%" valign="top" style="background: #fff5f5; border-left: 3px solid #ef4444; padding: 10px; border-radius: 4px;">
+                            <b style="color: #b91c1c; display:block; margin-bottom:5px;">🔴 投资亮点</b>
+                            <span style="color: #7f1d1d; line-height: 1.5;">{highlights}</span>
+                        </td>
+                        <td width="4%"></td>
+                        <td width="48%" valign="top" style="background: #f0fdf4; border-left: 3px solid #10b981; padding: 10px; border-radius: 4px;">
+                            <b style="color: #047857; display:block; margin-bottom:5px;">🟢 风险因素</b>
+                            <span style="color: #064e3b; line-height: 1.5;">{risks}</span>
+                        </td>
+                    </tr>
+                </table>
             </div>
             """
 
-    # 🌸 浪漫彩蛋
     if gemini_data.get('romantic_quote'):
         html += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
@@ -300,9 +314,6 @@ def send_email(html_body):
     except Exception as e:
         log(f"❌ 邮件模块报错: {str(e)}")
 
-# ==========================================
-# 🚀 主控并发调度系统
-# ==========================================
 def main():
     log("🎬 启动 DeepSeek + Gemini 混合专家模型调度枢纽...")
     
