@@ -63,18 +63,19 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集
+# 3. 双核 Prompt 指令集 (聚焦多氟多与华虹宏力)
 # ==========================================
 COZE_PROMPT = f"""
-今天是 {today_str}。请执行 A 股重点行业与核心资产的深度研判。
+今天是 {today_str}。请执行 A 股重点行业与双核心标的的精准深度研判。
 🚨【历史已报过滤】：{past_news_list}
 
 【执行要求】：
-1. 🏭【行业精要】（2-4条）：聚焦国内军工、电网、新能源的最新政策传导与产业动态。
-2. 🎯【金股深度追踪】：覆盖【航发科技、航天动力、航发控制、长江电力、多氟多、英维克、中国能建、中国船舶、云南锗业】。
-   - 请通过 1~2 次聚合搜索了解重点板块整体行情与龙头动向，切忌频繁单股重复检索。
-   - 提取各标的【价格区间/估值中枢】与【关键筹码博弈逻辑】。
-   - 严禁在输出中出现“工具接口异常”、“无数据”等技术报错词汇；若未获取到实时秒级报价，请依据最新估值分位、关键技术关口与财报基本面进行专业定性推演。
+1. 🏭【行业精要】（2-4条）：聚焦国内半导体芯片晶圆制造、新能源电池及关键新材料的最新产业政策与供需动态。
+2. 🎯【金股深度追踪】：严格仅追踪【多氟多】与【华虹宏力】两只核心标的，删除其余无关个股。
+   - 【标的1：多氟多】：深入分析六氟磷酸锂价格周期、电子级氟化氢/氢氟酸产能扩张、储能及钠电正极新材料业务兑现度与量价筹码博弈。
+   - 【标的2：华虹宏力（华虹公司/华虹半导体）】：深入分析特色工艺晶圆代工产能利用率、功率器件/MCU/CIS汽车电子需求、12英寸晶圆厂扩产进度与估值修复空间。
+   - 请调用联网搜索，获取这两只标的的最新真实估值中枢、关键技术价格区间及基本面重大动向。
+   - 严禁输出“工具接口异常”等报错字样；若无法获取秒级实时价格，依据最新财报基本面、行业周期拐点与关键支撑阻力带进行深度定性推演。
    - 采用[投资亮点]与[风险因素]双边对抗评估模式。
    - 输出趋势颜色：看多/低位输出 #ef4444，看空/高位输出 #10b981，震荡输出 #f97316。
 
@@ -83,9 +84,18 @@ COZE_PROMPT = f"""
     "sector_news": [{{ "title": "行业动态标题", "summary": "详尽逻辑摘要" }}],
     "focus_stocks": [
         {{ 
-            "name": "股票名", 
-            "trend_signal": "极简趋势状态(如: 触底反弹 / 估值消化 / 震荡蓄势)", 
-            "price_info": "估值中枢与关键区间(如: 核心支撑区间 / 估值历史20%分位)", 
+            "name": "多氟多", 
+            "trend_signal": "极简趋势状态(如: 触底反弹 / 估值筑底 / 震荡蓄势)", 
+            "price_info": "估值中枢与关键区间(如: 核心支撑区间 / 估值历史低位分位)", 
+            "key_levels": "盘面博弈与筹码结构逻辑分析", 
+            "highlights": ["亮点1", "亮点2"], 
+            "risks": ["风险1", "风险2"], 
+            "valuation_color": "必须为 #ef4444 或 #10b981 或 #f97316" 
+        }},
+        {{ 
+            "name": "华虹宏力", 
+            "trend_signal": "极简趋势状态(如: 产能饱满 / 周期回暖 / 估值修复)", 
+            "price_info": "估值中枢与关键区间(如: 核心支撑区间 / PB估值分位)", 
             "key_levels": "盘面博弈与筹码结构逻辑分析", 
             "highlights": ["亮点1", "亮点2"], 
             "risks": ["风险1", "风险2"], 
@@ -190,7 +200,6 @@ def fetch_coze_data(retry=0):
 
 def fetch_gemini_data():
     if not gemini_client: return None
-    # 优先挂载 Gemini 3.7 Flash 旗舰引擎
     model_candidates = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
     
     for model_id in model_candidates:
@@ -252,7 +261,7 @@ def format_html(domestic_data, gemini_data):
             """
         html += "</div>"
 
-    # 2. 每日核心科学概念 (全新模块)
+    # 2. 每日核心科学概念
     if gemini_data.get('science_concept'):
         concept = gemini_data.get('science_concept', {})
         html += "<h3 style='color: #581c87; border-bottom: 2px solid #8b5cf6; padding-bottom: 6px; margin-top: 25px;'>⚛️ 每日核心科学概念</h3>"
@@ -271,13 +280,13 @@ def format_html(domestic_data, gemini_data):
         </div>
         """
 
-    # 3. 国内行业政策
+    # 3. 国内重点行业逻辑与政策传导
     if domestic_data.get('sector_news'):
         html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px; margin-top: 25px;'>🏭 国内重点行业逻辑与政策传导</h3>"
         for item in domestic_data.get('sector_news', []):
             html += f"<div style='margin-bottom: 15px;'><h4 style='margin: 0 0 4px 0; font-size: 14.5px;'>▪ {item.get('title')}</h4><p style='margin:0; font-size: 13px; color: #475569; line-height: 1.6;'>{item.get('summary')}</p></div>"
 
-    # 4. 医学前沿
+    # 4. 博士级学术前沿追踪
     if gemini_data.get('medical_news'):
         html += "<h3 style='color: #065f46; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 25px;'>🧬 博士级学术前沿追踪</h3>"
         for med in gemini_data.get('medical_news', []):
@@ -294,7 +303,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
-    # 5. A 股评估矩阵
+    # 5. A 股核心资产双边评估矩阵 (多氟多 + 华虹宏力)
     if domestic_data.get('focus_stocks'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产双边评估矩阵</h3>"
         for stock in domestic_data.get('focus_stocks', []):
@@ -311,7 +320,7 @@ def format_html(domestic_data, gemini_data):
                     <span style="background-color: {v_color}15; color: {v_color}; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid {v_color}30;">{stock.get('trend_signal')}</span>
                 </div>
                 <div style="margin-bottom: 8px; font-size: 12.5px; color: #0369a1; background: #f0f9ff; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #0284c7;">
-                    <b>🎯 价格/估值中枢：</b>{price_info}
+                    <b>🎯 估值/价格中枢：</b>{price_info}
                 </div>
                 <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 12px;">
                     <b>📊 盘面博弈：</b>{stock.get('key_levels')}
@@ -333,7 +342,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
-    # 6. 晨间情话彩蛋
+    # 6. 晨间情话
     if gemini_data.get('romantic_quote'):
         html += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
