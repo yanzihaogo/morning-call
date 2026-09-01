@@ -63,7 +63,7 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集 (抗熔断与聚合检索版)
+# 3. 双核 Prompt 指令集
 # ==========================================
 COZE_PROMPT = f"""
 今天是 {today_str}。请执行 A 股重点行业与核心资产的深度研判。
@@ -96,11 +96,15 @@ COZE_PROMPT = f"""
 """
 
 GEMINI_PROMPT = f"""
-今天是 {today_str}。请执行全球前沿探索与学术提炼。
+今天是 {today_str}。请执行全球前沿探索、基础科学提炼与学术深读。
 🚨【核心指令】：
 1. 全局抓取 6-8 条外盘宏观或前沿科技快讯，严禁捏造URL，必须提供搜索关键词。
 2. 精读 2 篇顶级医学文献，标题必须是论文项目名称，并在所有专有名词和药物后用括号附上英语原文。
-3. 严禁使用任何花体字或特殊 Unicode 数学字符。
+3. ⚛️【每日科学核心概念】：每天随机挑选 1 个科学核心基础名词/概念。
+   - 要求用 1-2 句话给出最清晰透彻的本质解释；
+   - 附带一个它在人体生理/病理、前沿科研实验室或现实运行系统中的运作场景；
+   - 领域偏好：70% 概率为生物学、医学或先进材料学；30% 概率跨界至天文学、认知心理学、理论物理、计算机科学或经济学。
+4. 严禁使用任何花体字或特殊 Unicode 数学字符。
 
 🚨【强制以纯 JSON 格式返回】：
 {{
@@ -113,6 +117,12 @@ GEMINI_PROMPT = f"""
             "search_keyword": "验证该新闻的精确搜索关键词"
         }}
     ],
+    "science_concept": {{
+        "term": "科学核心基础名词 (English Name)",
+        "field": "所属学科领域 (如: 结构生物学 / 凝聚态物理 / 认知神经科学 / 宏观经济学)",
+        "definition": "1-2句话极简清晰的本质解释",
+        "scenario": "在人体内或科研/现实系统中的具体运作/应用场景"
+    }},
     "medical_news": [
         {{
             "project_title": "研究项目或论文名称 (English Title)",
@@ -180,7 +190,7 @@ def fetch_coze_data(retry=0):
 
 def fetch_gemini_data():
     if not gemini_client: return None
-    # 优先使用 Gemini 3.7 Flash 引擎
+    # 优先挂载 Gemini 3.7 Flash 旗舰引擎
     model_candidates = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-flash']
     
     for model_id in model_candidates:
@@ -225,6 +235,7 @@ def format_html(domestic_data, gemini_data):
             <div style="padding: 0 20px 20px 20px;">
     """
     
+    # 1. 全球快讯
     if gemini_data.get('global_news_flash'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px;'>🌍 全球高优行业快讯池</h3>"
         html += "<div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px;'>"
@@ -241,13 +252,34 @@ def format_html(domestic_data, gemini_data):
             """
         html += "</div>"
 
+    # 2. 每日核心科学概念 (全新模块)
+    if gemini_data.get('science_concept'):
+        concept = gemini_data.get('science_concept', {})
+        html += "<h3 style='color: #581c87; border-bottom: 2px solid #8b5cf6; padding-bottom: 6px; margin-top: 25px;'>⚛️ 每日核心科学概念</h3>"
+        html += f"""
+        <div style="background-color: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 15.5px; color: #4c1d95; font-weight: bold;">💡 {concept.get('term')}</span>
+                <span style="background-color: #ede9fe; color: #6d28d9; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; font-weight: bold; border: 1px solid #c4b5fd;">{concept.get('field')}</span>
+            </div>
+            <div style="font-size: 13px; color: #3b0764; line-height: 1.6; margin-bottom: 8px;">
+                <b>📖 概念释义：</b>{concept.get('definition')}
+            </div>
+            <div style="font-size: 12.5px; color: #5b21b6; line-height: 1.6; background-color: #ffffff; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #8b5cf6;">
+                <b>🧪 运作/科研场景：</b>{concept.get('scenario')}
+            </div>
+        </div>
+        """
+
+    # 3. 国内行业政策
     if domestic_data.get('sector_news'):
-        html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px;'>🏭 国内重点行业逻辑与政策传导</h3>"
+        html += "<h3 style='color: #1e293b; border-bottom: 2px solid #64748b; padding-bottom: 6px; margin-top: 25px;'>🏭 国内重点行业逻辑与政策传导</h3>"
         for item in domestic_data.get('sector_news', []):
             html += f"<div style='margin-bottom: 15px;'><h4 style='margin: 0 0 4px 0; font-size: 14.5px;'>▪ {item.get('title')}</h4><p style='margin:0; font-size: 13px; color: #475569; line-height: 1.6;'>{item.get('summary')}</p></div>"
 
+    # 4. 医学前沿
     if gemini_data.get('medical_news'):
-        html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 25px;'>🧬 博士级学术前沿追踪</h3>"
+        html += "<h3 style='color: #065f46; border-bottom: 2px solid #10b981; padding-bottom: 6px; margin-top: 25px;'>🧬 博士级学术前沿追踪</h3>"
         for med in gemini_data.get('medical_news', []):
             html += f"""
             <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; padding: 18px; border-radius: 12px; margin-bottom: 15px;">
@@ -262,6 +294,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
+    # 5. A 股评估矩阵
     if domestic_data.get('focus_stocks'):
         html += "<h3 style='color: #1e3c72; border-bottom: 2px solid #3b82f6; padding-bottom: 6px; margin-top: 25px;'>📈 A 股核心资产双边评估矩阵</h3>"
         for stock in domestic_data.get('focus_stocks', []):
@@ -300,6 +333,7 @@ def format_html(domestic_data, gemini_data):
             </div>
             """
 
+    # 6. 晨间情话彩蛋
     if gemini_data.get('romantic_quote'):
         html += f"""
         <div style="background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 100%); padding: 25px; text-align: center; border-radius: 16px; color: #be123c; font-weight: bold; margin-top: 30px; font-size: 14.5px; box-shadow: 0 4px 10px rgba(251,207,232,0.3);">
