@@ -63,7 +63,7 @@ def save_new_history(domestic_data):
 past_news_list = get_past_news()
 
 # ==========================================
-# 3. 双核 Prompt 指令集 (多氟多 + 华虹宏力 + 中信证券)
+# 3. 双核 Prompt 指令集
 # ==========================================
 COZE_PROMPT = f"""
 今天是 {today_str}。请执行 A 股重点行业与三大核心标的的精准深度研判。
@@ -116,14 +116,15 @@ COZE_PROMPT = f"""
 """
 
 GEMINI_PROMPT = f"""
-今天是 {today_str}。请执行全球前沿探索、基础科学提炼与学术深读。
+今天是 {today_str}。请执行全球前沿探索、科学趣味发现（Fun Facts）与学术深读。
 🚨【核心指令】：
 1. 全局抓取 6-8 条外盘宏观或前沿科技快讯，严禁捏造URL，必须提供搜索关键词。
 2. 精读 2 篇顶级医学文献，标题必须是论文项目名称，并在所有专有名词和药物后用括号附上英语原文。
-3. ⚛️【每日科学核心概念】：每天随机挑选 1 个科学核心基础名词/概念。
-   - 要求用 1-2 句话给出最清晰透彻的本质解释；
-   - 附带一个它在人体生理/病理、前沿科研实验室或现实运行系统中的运作场景；
-   - 领域偏好：70% 概率为生物学、医学或先进材料学；30% 概率跨界至天文学、认知心理学、理论物理、计算机科学或经济学。
+3. 💡【Fun Facts 科学趣味发现】：每天随机挑选 1 个科学核心基础名词/概念。
+   - 【专业底色】：用 1-2 句话给出清晰严谨的本质学术解释；
+   - 【运作场景】：附带一个它在人体生理/病理、前沿实验室或现实系统中的运作机制；
+   - 【趣味发现故事】：讲述它是“如何被意外发现的”科学轶事、科学家的高光顿悟时刻、奇妙事故，或者一个极具启发性、反直觉的趣味冷知识。要求文字生动有趣、引人入胜，让晨间阅读充满惊喜；
+   - 【学科概率】：70% 概率为生物学、医学或先进材料学；30% 概率跨界至天文学、认知心理学、理论物理、计算机科学或经济学。
 4. 严禁使用任何花体字或特殊 Unicode 数学字符。
 
 🚨【强制以纯 JSON 格式返回】：
@@ -140,8 +141,9 @@ GEMINI_PROMPT = f"""
     "science_concept": {{
         "term": "科学核心基础名词 (English Name)",
         "field": "所属学科领域 (如: 结构生物学 / 凝聚态物理 / 认知神经科学 / 宏观经济学)",
-        "definition": "1-2句话极简清晰的本质解释",
-        "scenario": "在人体内或科研/现实系统中的具体运作/应用场景"
+        "definition": "1-2句话清晰严密的本质学术解释",
+        "scenario": "在人体内或科研/现实系统中的具体运作/应用场景",
+        "discovery_or_fun_fact": "发现背后的趣味轶事、尤里卡顿悟瞬间或反直觉趣闻（100字左右，生动活泼）"
     }},
     "medical_news": [
         {{
@@ -272,21 +274,24 @@ def format_html(domestic_data, gemini_data):
             """
         html += "</div>"
 
-    # 2. 每日核心科学概念
+    # 2. Fun Facts (原科学核心概念升级版)
     if gemini_data.get('science_concept'):
         concept = gemini_data.get('science_concept', {})
-        html += "<h3 style='color: #581c87; border-bottom: 2px solid #8b5cf6; padding-bottom: 6px; margin-top: 25px;'>⚛️ 每日核心科学概念</h3>"
+        html += "<h3 style='color: #581c87; border-bottom: 2px solid #8b5cf6; padding-bottom: 6px; margin-top: 25px;'>💡 Fun Facts</h3>"
         html += f"""
         <div style="background-color: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <span style="font-size: 15.5px; color: #4c1d95; font-weight: bold;">💡 {concept.get('term')}</span>
                 <span style="background-color: #ede9fe; color: #6d28d9; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; font-weight: bold; border: 1px solid #c4b5fd;">{concept.get('field')}</span>
             </div>
-            <div style="font-size: 13px; color: #3b0764; line-height: 1.6; margin-bottom: 8px;">
-                <b>📖 概念释义：</b>{concept.get('definition')}
+            <div style="font-size: 13px; color: #3b0764; line-height: 1.6; margin-bottom: 10px;">
+                <b>📖 学术释义：</b>{concept.get('definition')}
             </div>
-            <div style="font-size: 12.5px; color: #5b21b6; line-height: 1.6; background-color: #ffffff; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #8b5cf6;">
-                <b>🧪 运作/科研场景：</b>{concept.get('scenario')}
+            <div style="font-size: 12.5px; color: #5b21b6; line-height: 1.6; background-color: #ffffff; padding: 9px 12px; border-radius: 6px; border-left: 3px solid #8b5cf6; margin-bottom: 10px;">
+                <b>🧪 运作机制/场景：</b>{concept.get('scenario')}
+            </div>
+            <div style="font-size: 12.5px; color: #6b21a8; line-height: 1.6; background-color: #fdf4ff; padding: 9px 12px; border-radius: 6px; border-left: 3px solid #d946ef;">
+                <b>✨ 发现故事 / 趣味轶事：</b>{concept.get('discovery_or_fun_fact')}
             </div>
         </div>
         """
