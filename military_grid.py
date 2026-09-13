@@ -7,6 +7,7 @@ import smtplib
 import sys
 import time
 import unicodedata
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -43,8 +44,10 @@ receiver_email = os.getenv("RECEIVER_EMAIL", "779825335@qq.com").strip()
 cc_email = os.getenv("CC_EMAIL", "15757699818@163.com").strip()
 
 hero_image_url = os.getenv("EMAIL_HERO_IMAGE_URL", "").strip()
-gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-gemini_fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
+gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.7-flash").strip()
+gemini_fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash").strip()
+gemini_thinking_level = os.getenv("GEMINI_THINKING_LEVEL", "low").strip().lower()
+gemini_max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "12000"))
 
 REQUEST_TIMEOUT = (15, 60)
 HISTORY_FILE = os.getenv("HISTORY_FILE", "daily_report_history.json").strip()
@@ -306,7 +309,28 @@ def normalize_domestic_data(data):
                     "source_url": "",
                 }
             )
-    return {"focus_stocks": focus_stocks}
+    market = _bounded_dict(data.get("market_snapshot"))
+    normalized_market = {
+        "a_share_session": clean_string(market.get("a_share_session"), 80),
+        "a_share_summary": clean_string(market.get("a_share_summary"), 1000),
+        "overnight_markets": clean_string(market.get("overnight_markets"), 800),
+        "risk_appetite": clean_string(market.get("risk_appetite"), 500),
+        "market_worry": clean_string(market.get("market_worry"), 500),
+        "published_at": clean_string(market.get("published_at"), 50),
+        "source_title": clean_string(market.get("source_title"), 180),
+        "source_url": clean_string(market.get("source_url"), 800),
+    }
+    if not has_reliable_source(normalized_market):
+        normalized_market = {}
+
+    return {
+        "focus_stocks": focus_stocks,
+        "market_snapshot": normalized_market,
+        "today_events": normalize_news_items(data.get("today_events"), 3),
+        "focus_sector_news": normalize_news_items(
+            data.get("focus_sector_news"), 4
+        ),
+    }
 
 
 def normalize_news_items(value, limit):
@@ -414,7 +438,41 @@ def normalize_gemini_data(data):
 # ==========================================
 # 4. 提示词
 # ==========================================
-STOCK_OUTPUT_EXAMPLE = {
+DOMESTIC_OUTPUT_EXAMPLE = {
+    "market_snapshot": {
+        "a_share_session": "最近一个已结束的 A 股交易日及日期",
+        "a_share_summary": "指数、成交额、涨跌家数、涨跌停、强弱板块和赚钱效应",
+        "overnight_markets": "隔夜美股与重要海外市场概览",
+        "risk_appetite": "今日开盘前风险偏好判断",
+        "market_worry": "市场当前最担心的一件事",
+        "published_at": "来源日期",
+        "source_title": "主要来源标题",
+        "source_url": "真实 HTTPS 链接",
+    },
+    "today_events": [
+        {
+            "title": "影响全球市场的重要事件",
+            "category": "央行/宏观/地缘/能源/贸易",
+            "summary": "发生了什么",
+            "why_important": "为什么重要",
+            "market_impact": "可能影响",
+            "published_at": "来源日期",
+            "source_title": "来源标题",
+            "source_url": "真实 HTTPS 链接",
+        }
+    ],
+    "focus_sector_news": [
+        {
+            "title": "重点行业新增信息",
+            "category": "AI与半导体/新能源与储能材料/券商与资本市场/创新药与脑机接口",
+            "summary": "发生了什么",
+            "why_important": "为什么重要",
+            "market_impact": "产业或投资影响",
+            "published_at": "来源日期",
+            "source_title": "来源标题",
+            "source_url": "真实 HTTPS 链接",
+        }
+    ],
     "focus_stocks": [
         {
             "name": "多氟多",
@@ -431,22 +489,34 @@ STOCK_OUTPUT_EXAMPLE = {
 }
 
 COZE_PROMPT = f"""
-今天是 {today_str}。只追踪以下三只固定 A 股：
+今天是 {today_str}。请利用你已经连接的国内财经检索能力，制作晨报中的市场与资讯部分。
+
+一、A股市场概览
+读取最近一个已经结束的 A 股交易日，简要说明上证、深证、创业板等主要指数、全市场成交额、上涨/下跌家数、涨跌停数量、强弱板块和赚钱效应；再概括隔夜美股及重要海外市场，判断今日开盘前风险偏好，并指出市场当前最担心的一件事。无法核验的数字直接省略。
+
+二、全球重要事件，最多 3 条
+只选可能影响利率、汇率、能源、贸易或全球风险偏好的头条级事件。近期已报：{history_text('major_news', 30)}
+
+三、重点行业新闻，最多 4 条
+只跟踪 AI/半导体、新能源/储能材料、券商/资本市场、创新药/脑机接口。近期已报：{history_text('sector_news', 40)}
+
+四、固定股票
+只追踪以下三只固定 A 股：
 多氟多 002407.SZ、华虹公司 688347.SH、中信证券 600030.SH。
 
 目标不是重复长期投资逻辑，而是回答“和上一期相比，有什么新增变化”。
 近期已经报道的变化：{history_text('stock_changes', 30)}
 
-要求：
+统一要求：
 1. 只写公告、监管文件、公司正式披露或可靠主流财经媒体已经证实的新增变化。
 2. 没有重要变化时直接写“暂无值得特别关注的新变化。”，不要凑内容。
 3. 删除价格、涨跌幅、PE/PB、支撑位、压力位、技术指标和筹码区间。
 4. 不得把港股华虹半导体 01347.HK 的行情或估值写入华虹公司 688347.SH。
-5. 有新增事实时必须提供发布日期、来源标题和真实 HTTPS 链接；无法核验则不要写成事实。
+5. 市场、新闻和股票的事实必须提供发布日期、来源标题和真实可打开的 HTTPS 链接；无法核验则不要输出。
 6. 严格返回一个 JSON 对象，不要使用 Markdown。
 
 输出结构示例：
-{json.dumps(STOCK_OUTPUT_EXAMPLE, ensure_ascii=False, indent=2)}
+{json.dumps(DOMESTIC_OUTPUT_EXAMPLE, ensure_ascii=False, indent=2)}
 """
 
 
@@ -532,7 +602,8 @@ fun_fact_domain = (
     else "物理、天文、计算机、AI、心理学或经济学"
 )
 
-GEMINI_PROMPT = f"""
+# 旧版联网提示词仅保留作结构参考；免费版不会调用它。
+UNUSED_LEGACY_GEMINI_PROMPT = f"""
 今天是 {today_str}。请先使用 Google Search 检索并核验，再制作一份中文晨报数据。
 最终只返回一个 JSON 对象，不要输出 Markdown、引用脚注或 JSON 之外的解释。
 
@@ -660,14 +731,202 @@ def fetch_coze_data(max_attempts=3):
     return normalize_domestic_data({})
 
 
+def _xml_text(node):
+    return " ".join("".join(node.itertext()).split()) if node is not None else ""
+
+
+def fetch_pubmed(query, limit=6, days=120):
+    """使用免费的 NCBI E-utilities 获取真实论文题录与摘要。"""
+    headers = {"User-Agent": "MorningCall/2.0 (daily literature digest)"}
+    search = requests.get(
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        params={
+            "db": "pubmed",
+            "term": query,
+            "retmode": "json",
+            "retmax": limit,
+            "sort": "pub date",
+            "datetype": "pdat",
+            "reldate": days,
+        },
+        headers=headers,
+        timeout=REQUEST_TIMEOUT,
+    )
+    search.raise_for_status()
+    pmids = search.json().get("esearchresult", {}).get("idlist", [])
+    if not pmids:
+        return []
+
+    fetched = requests.get(
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+        params={"db": "pubmed", "id": ",".join(pmids), "retmode": "xml"},
+        headers=headers,
+        timeout=REQUEST_TIMEOUT,
+    )
+    fetched.raise_for_status()
+    root = ET.fromstring(fetched.content)
+    records = []
+    for article in root.findall(".//PubmedArticle"):
+        citation = article.find("MedlineCitation")
+        article_node = citation.find("Article") if citation is not None else None
+        if article_node is None:
+            continue
+        pmid = _xml_text(citation.find("PMID"))
+        title = _xml_text(article_node.find("ArticleTitle"))
+        abstract_parts = []
+        for part in article_node.findall(".//Abstract/AbstractText"):
+            label = part.attrib.get("Label", "")
+            value = _xml_text(part)
+            if value:
+                abstract_parts.append(f"{label}: {value}" if label else value)
+        abstract = " ".join(abstract_parts)
+        if not pmid or not title or not abstract:
+            continue
+
+        journal = _xml_text(article_node.find(".//Journal/Title"))
+        pub_date_node = article_node.find(".//JournalIssue/PubDate")
+        pub_date = _xml_text(pub_date_node)
+        doi = ""
+        for article_id in article.findall(".//PubmedData/ArticleIdList/ArticleId"):
+            if article_id.attrib.get("IdType") == "doi":
+                doi = _xml_text(article_id)
+                break
+
+        records.append(
+            {
+                "pmid": pmid,
+                "doi": doi,
+                "title": title,
+                "journal": journal,
+                "published_at": pub_date,
+                "abstract": clean_string(abstract, 3500),
+                "source_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            }
+        )
+    return records
+
+
+def get_literature_packets():
+    pearl_queries = {
+        "口腔颌面": '("Mouth Diseases"[MeSH Terms] OR "Maxillofacial Surgery"[MeSH Terms])',
+        "医美": '("Cosmetic Techniques"[MeSH Terms] OR aesthetic medicine[Title/Abstract])',
+        "营养学": '("Nutritional Sciences"[MeSH Terms] OR nutrition[Title/Abstract])',
+        "基础医学": '(mechanism[Title/Abstract] AND (cell[Title/Abstract] OR molecular[Title/Abstract]))',
+    }
+    queries = {
+        "general_frontier": '((Nature[Journal] OR Science[Journal] OR Cell[Journal] OR "Nature Medicine"[Journal] OR "N Engl J Med"[Journal] OR Lancet[Journal]) AND humans[MeSH Terms])',
+        "personal_research": '((oral cancer[Title/Abstract] OR head and neck cancer[Title/Abstract] OR bone regeneration[Title/Abstract] OR biomaterial*[Title/Abstract] OR maxillofacial[Title/Abstract]) AND (tumor[Title/Abstract] OR regeneration[Title/Abstract] OR material*[Title/Abstract]))',
+        "medical_pearl": pearl_queries[pearl_category],
+    }
+    packets = {}
+    for key, query in queries.items():
+        try:
+            packets[key] = fetch_pubmed(query, limit=6, days=180)
+            log(f"PubMed {key} 获取 {len(packets[key])} 篇候选文献")
+        except Exception as exc:
+            log(f"PubMed {key} 获取失败：{str(exc)[:300]}")
+            packets[key] = []
+    return packets
+
+
+def build_free_gemini_prompt(packets):
+    compact_packets = {
+        key: value for key, value in packets.items() if value
+    }
+    return f"""
+今天是 {today_str}。下面是程序刚刚通过美国国家医学图书馆 PubMed 免费接口获取的真实论文题录与摘要。
+你不能联网，也不需要搜索。只能使用给定资料，不得补写资料中不存在的论文、PMID、DOI、日期、数字或结论。
+
+候选资料：
+{json.dumps(compact_packets, ensure_ascii=False)}
+
+任务：
+1. 从 general_frontier 中选择 1 篇真正有医学或生命科学前沿价值的论文。
+2. 从 personal_research 中选择 1 篇最贴近口腔颌面、头颈/口腔肿瘤、生物信息学、抗肿瘤或骨修复材料的论文，并写研究启发。
+3. 论文的 doi_or_pmid 必须写资料中的 PMID；source_url 必须原样复制对应 PubMed 链接。
+4. 只有摘要确实涉及药物或干预时才填写 drug_or_intervention，否则留空。
+5. 从 medical_pearl 中选择一篇资料，制作“{pearl_category}”主题的 Medical Pearl。仅作知识讲解，不给个体诊疗、处方或剂量建议；链接必须原样复制。
+6. 从上述真实论文中提炼一个“{fun_fact_domain}”概念作为 Fun Facts，来源链接必须原样复制，且不要重复：{history_text('fun_facts', 60)}
+7. 写一句 50 字以内的自然早安短句。
+8. 严格返回 JSON，不要 Markdown。market_snapshot、today_events、focus_sector_news 必须返回空对象或空数组，因为这些栏目由国内模型负责。
+
+输出结构：
+{json.dumps(REPORT_OUTPUT_EXAMPLE, ensure_ascii=False, indent=2)}
+"""
+
+
+def _pmid_from_output(item):
+    text = " ".join(
+        str(item.get(key, ""))
+        for key in ("doi_or_pmid", "source_url", "project_title")
+    )
+    match = re.search(r"\b\d{6,9}\b", text)
+    return match.group(0) if match else ""
+
+
+def bind_gemini_to_pubmed(data, packets):
+    """把 Gemini 的输出重新绑定到 PubMed 原始记录，阻断伪造链接。"""
+    result = normalize_gemini_data(data)
+    allowed_by_type = {
+        key: {record["pmid"]: record for record in records}
+        for key, records in packets.items()
+    }
+    verified_papers = []
+    for paper in result.get("academic_papers", []):
+        paper_type = paper.get("paper_type")
+        allowed = allowed_by_type.get(paper_type, {})
+        record = allowed.get(_pmid_from_output(paper))
+        if not record:
+            continue
+        paper.update(
+            {
+                "project_title": record["title"],
+                "journal_and_time": " · ".join(
+                    part for part in (record["journal"], record["published_at"]) if part
+                ),
+                "doi_or_pmid": f"PMID {record['pmid']}" + (
+                    f" · DOI {record['doi']}" if record["doi"] else ""
+                ),
+                "source_title": f"PubMed：{record['title']}",
+                "source_url": record["source_url"],
+            }
+        )
+        verified_papers.append(paper)
+    result["academic_papers"] = verified_papers
+
+    all_urls = {
+        record["source_url"]
+        for records in packets.values()
+        for record in records
+    }
+    pearl = result.get("medical_pearl") or {}
+    if pearl.get("source_url") not in all_urls:
+        result["medical_pearl"] = {}
+    concept = result.get("science_concept") or {}
+    if concept.get("source_url") not in all_urls:
+        result["science_concept"] = {}
+    return result
+
+
 def fetch_gemini_data():
     if gemini_client is None or types is None:
         log("未检测到可用的 Google GenAI SDK 或 GOOGLE_API_KEY。")
         return None
 
-    # 关键修订：启用 Google Search grounding。旧版代码只有 JSON 模式，没有真实检索。
-    search_tool = types.Tool(google_search=types.GoogleSearch())
-    config = types.GenerateContentConfig(tools=[search_tool])
+    packets = get_literature_packets()
+    if not packets.get("general_frontier") or not packets.get("personal_research"):
+        log("PubMed 候选文献不足，本次不让 Gemini 凭记忆补写。")
+        return None
+
+    prompt = build_free_gemini_prompt(packets)
+    # 免费方案不调用 Google Search grounding，只消耗现有文本模型额度。
+    config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(
+            thinking_level=gemini_thinking_level,
+        ),
+        max_output_tokens=gemini_max_output_tokens,
+        response_mime_type="application/json",
+    )
     model_candidates = list(
         dict.fromkeys(
             model
@@ -678,41 +937,18 @@ def fetch_gemini_data():
 
     for model_id in model_candidates:
         for attempt in range(1, 3):
-            log(f"正在检索市场、科研与医学信息：{model_id}（{attempt}/2）")
+            log(f"正在解读 PubMed 医学文献：{model_id}（{attempt}/2）")
             try:
                 response = gemini_client.models.generate_content(
                     model=model_id,
-                    contents=GEMINI_PROMPT,
+                    contents=prompt,
                     config=config,
                 )
-                candidates = getattr(response, "candidates", None) or []
-                grounding = (
-                    getattr(candidates[0], "grounding_metadata", None)
-                    if candidates
-                    else None
+                data = bind_gemini_to_pubmed(
+                    extract_json(response.text), packets
                 )
-                grounding_queries = (
-                    getattr(grounding, "web_search_queries", None)
-                    if grounding is not None
-                    else None
-                )
-                grounding_chunks = (
-                    getattr(grounding, "grounding_chunks", None)
-                    if grounding is not None
-                    else None
-                )
-                if not grounding_queries and not grounding_chunks:
-                    raise ValueError("本次响应没有 Google Search grounding 记录")
-                data = normalize_gemini_data(extract_json(response.text))
-                if not any(
-                    (
-                        data.get("today_events"),
-                        data.get("focus_sector_news"),
-                        data.get("academic_papers"),
-                        data.get("medical_pearl", {}).get("question"),
-                    )
-                ):
-                    raise ValueError("Gemini 返回 JSON，但没有可用栏目")
+                if len(data.get("academic_papers", [])) < 2:
+                    raise ValueError("Gemini 没有从指定 PubMed 候选中选出两篇论文")
                 return data
             except Exception as exc:
                 message = str(exc)
@@ -941,6 +1177,13 @@ def main():
     if not gemini_data:
         log("市场、新闻、科研与医学数据获取失败，本次不发送残缺日报。")
         sys.exit(1)
+
+    # 市场和资讯以国内模型为准；Gemini 只负责 PubMed 文献与医学解读。
+    gemini_data["market_snapshot"] = domestic_data.get("market_snapshot") or {}
+    gemini_data["today_events"] = domestic_data.get("today_events") or []
+    gemini_data["focus_sector_news"] = (
+        domestic_data.get("focus_sector_news") or []
+    )
 
     html_body = format_html(domestic_data, gemini_data)
     if not send_email(html_body):
