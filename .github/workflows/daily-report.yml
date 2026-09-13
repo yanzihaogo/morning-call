@@ -2,13 +2,17 @@ name: 每日晨报（Gemini 3.8 Flash）
 
 on:
   schedule:
-    # 每天北京时间 07:00（UTC 前一天 23:00）
+    # 每天北京时间早上 07:00 运行
+    # 对应 UTC 时间前一天 23:00
     - cron: "0 23 * * *"
+
+  # 允许在 GitHub Actions 页面手动运行
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# 防止同一时间重复运行两份日报
 concurrency:
   group: daily-report
   cancel-in-progress: false
@@ -16,23 +20,28 @@ concurrency:
 jobs:
   generate-and-send:
     runs-on: ubuntu-latest
+
+    # 超过 15 分钟就停止，避免异常消耗
     timeout-minutes: 15
 
     steps:
+      # 第一步：下载仓库内容
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 第二步：安装 Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      # 第三步：安装主程序所需组件
       - name: Install dependencies
-        run: python military_grid.py
+        run: |
           python -m pip install --upgrade pip
           python -m pip install google-genai requests
 
-      # GitHub 托管运行器每次都是新环境，先恢复历史记录才能跨天去重
+      # 第四步：恢复以前的日报历史，用于避免内容重复
       - name: Restore report history
         uses: actions/cache/restore@v4
         with:
@@ -41,17 +50,18 @@ jobs:
           restore-keys: |
             daily-report-history-
 
+      # 第五步：运行日报主程序并发送邮件
       - name: Generate and send report
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
           COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
+
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: "465"
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
 
-          # low 可以明显控制 Gemini 3.8 的等待时间和思考 token
           GEMINI_MODEL: gemini-3.8-flash
           GEMINI_FALLBACK_MODEL: gemini-3.7-flash
           GEMINI_THINKING_LEVEL: low
@@ -59,9 +69,9 @@ jobs:
 
           HISTORY_FILE: daily_report_history.json
 
-        run: python "日报代码_修改意见v2完成版.py"
+        run: python military_grid.py
 
-      # 主程序只有在邮件成功发出后才会生成新版历史记录
+      # 第六步：邮件发送成功后，保存本次日报历史
       - name: Save report history
         if: success()
         uses: actions/cache/save@v4
