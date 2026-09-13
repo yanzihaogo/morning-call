@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formatdate, make_msgid
+from email.utils import formatdate, make_msgid, parsedate_to_datetime
 
 import requests
 
@@ -735,10 +735,44 @@ def _xml_text(node):
     return " ".join("".join(node.itertext()).split()) if node is not None else ""
 
 
+def pubmed_get(url, **kwargs):
+    """所有 PubMed 请求串行限速；429/暂时故障最多尝试四次。"""
+    for attempt in range(4):
+        time.sleep(1.1)
+        try:
+            response = requests.get(url, **kwargs)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == 3:
+                raise
+            delay = 5 * (2 ** attempt)
+            log(f"PubMed 网络暂时异常，{delay} 秒后重试")
+            time.sleep(delay)
+            continue
+        if response.status_code not in (429, 500, 502, 503, 504):
+            response.raise_for_status()
+            return response
+        if attempt == 3:
+            response.raise_for_status()
+        delay = 5 * (2 ** attempt)
+        retry_after = response.headers.get("Retry-After", "")
+        try:
+            delay = max(delay, float(retry_after))
+        except (ValueError, TypeError):
+            try:
+                delay = max(delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
+            except (ValueError, TypeError, OverflowError):
+                pass
+        if delay > 60:
+            raise RuntimeError("PubMed 要求较长等待，本栏目暂缺，下次运行再取")
+        log(f"PubMed HTTP {response.status_code}，{delay:g} 秒后重试（{attempt + 1}/3）")
+        time.sleep(delay)
+    raise RuntimeError("PubMed 请求未成功")
+
+
 def fetch_pubmed(query, limit=6, days=120):
     """使用免费的 NCBI E-utilities 获取真实论文题录与摘要。"""
     headers = {"User-Agent": "MorningCall/2.0 (daily literature digest)"}
-    search = requests.get(
+    search = pubmed_get(
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
         params={
             "db": "pubmed",
@@ -757,7 +791,7 @@ def fetch_pubmed(query, limit=6, days=120):
     if not pmids:
         return []
 
-    fetched = requests.get(
+    fetched = pubmed_get(
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
         params={"db": "pubmed", "id": ",".join(pmids), "retmode": "xml"},
         headers=headers,
@@ -841,6 +875,7 @@ def build_free_gemini_prompt(packets):
 {json.dumps(compact_packets, ensure_ascii=False)}
 
 任务：
+0. 某组候选缺失时跳过该栏目，允许只输出一篇或零篇论文。不要补写未提供的资料。只根据摘要解读，明确区分摘要结论和研究启发，不得暗示已阅读全文。
 1. 从 general_frontier 中选择 1 篇真正有医学或生命科学前沿价值的论文。
 2. 从 personal_research 中选择 1 篇最贴近口腔颌面、头颈/口腔肿瘤、生物信息学、抗肿瘤或骨修复材料的论文，并写研究启发。
 3. 论文的 doi_or_pmid 必须写资料中的 PMID；source_url 必须原样复制对应 PubMed 链接。
@@ -872,12 +907,16 @@ def bind_gemini_to_pubmed(data, packets):
         for key, records in packets.items()
     }
     verified_papers = []
+    used_pmids = set()
+    used_types = set()
     for paper in result.get("academic_papers", []):
         paper_type = paper.get("paper_type")
         allowed = allowed_by_type.get(paper_type, {})
         record = allowed.get(_pmid_from_output(paper))
-        if not record:
+        if not record or record["pmid"] in used_pmids or paper_type in used_types:
             continue
+        used_pmids.add(record["pmid"])
+        used_types.add(paper_type)
         paper.update(
             {
                 "project_title": record["title"],
@@ -914,8 +953,8 @@ def fetch_gemini_data():
         return None
 
     packets = get_literature_packets()
-    if not packets.get("general_frontier") or not packets.get("personal_research"):
-        log("PubMed 候选文献不足，本次不让 Gemini 凭记忆补写。")
+    if not any(packets.values()):
+        log("PubMed 本次全部暂缺，跳过 Gemini 医学解读。")
         return None
 
     prompt = build_free_gemini_prompt(packets)
@@ -947,8 +986,8 @@ def fetch_gemini_data():
                 data = bind_gemini_to_pubmed(
                     extract_json(response.text), packets
                 )
-                if len(data.get("academic_papers", [])) < 2:
-                    raise ValueError("Gemini 没有从指定 PubMed 候选中选出两篇论文")
+                if not (data.get("academic_papers") or data.get("medical_pearl") or data.get("science_concept")):
+                    raise ValueError("Gemini 未返回可绑定到实际文献的内容")
                 return data
             except Exception as exc:
                 message = str(exc)
@@ -1052,6 +1091,17 @@ def format_html(domestic_data, gemini_data):
 <div style="font-size:11px;color:#64748b;margin-top:7px;">{e(stock.get('verification_status'))}{(' · ' + source) if source else ''}</div>
 </td></tr></table>"""
 
+    available_types = {p.get("paper_type") for p in gemini_data.get("academic_papers", [])}
+    missing_sections = [label for kind, label in (
+        ("general_frontier", "医学前沿文献"),
+        ("personal_research", "个人研究方向文献"),
+    ) if kind not in available_types]
+    if not gemini_data.get("medical_pearl"):
+        missing_sections.append("Medical Pearl")
+    if not gemini_data.get("science_concept"):
+        missing_sections.append("Fun Facts")
+    if missing_sections:
+        html += '<div style="padding:12px;color:#92400e;background:#fffbeb;">本期暂缺：' + e("、".join(missing_sections)) + '。资料获取或解读未成功，未用猜测内容补齐。</div>'
     papers = gemini_data.get("academic_papers", [])
     if papers:
         html += '<div style="font-size:18px;font-weight:700;color:#06604a;margin:24px 0 12px;">🧬 每日学术文献</div>'
@@ -1172,11 +1222,21 @@ def main():
         domestic_future = executor.submit(fetch_coze_data)
         gemini_future = executor.submit(fetch_gemini_data)
         domestic_data = domestic_future.result()
-        gemini_data = gemini_future.result()
+        try:
+            gemini_data = gemini_future.result()
+        except Exception as exc:
+            log(f"医学模块异常，保留其他栏目：{type(exc).__name__}")
+            gemini_data = None
 
-    if not gemini_data:
-        log("市场、新闻、科研与医学数据获取失败，本次不发送残缺日报。")
+    domestic_usable = any(domestic_data.get(key) for key in (
+        "market_snapshot", "today_events", "focus_sector_news"
+    )) or any(stock.get("source_url") for stock in domestic_data.get("focus_stocks", []))
+    if not gemini_data and not domestic_usable:
+        log("国内与医学模块均无可用内容，本次不发送空日报。")
         sys.exit(1)
+    if not gemini_data:
+        log("医学栏目暂缺，继续发送已取得的国内内容。")
+        gemini_data = {}
 
     # 市场和资讯以国内模型为准；Gemini 只负责 PubMed 文献与医学解读。
     gemini_data["market_snapshot"] = domestic_data.get("market_snapshot") or {}
